@@ -48,6 +48,7 @@ export function AppShell({
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch={false}
                     className={cn(
                       "block rounded-lg px-3 py-2 text-sm transition-colors",
                       active

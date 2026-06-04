@@ -19,7 +19,22 @@ function isAuthRoute(pathname: string) {
   );
 }
 
+function isPrefetchRequest(request: NextRequest) {
+  return (
+    request.headers.get("purpose") === "prefetch" ||
+    request.headers.has("next-router-prefetch")
+  );
+}
+
 export async function updateSession(request: NextRequest) {
+  if (isPrefetchRequest(request)) {
+    return NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    });
+  }
+
   if (!hasSupabaseEnv()) {
     return NextResponse.next({
       request: {
