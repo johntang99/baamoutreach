@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { PageHeader, SectionCard, StatCard } from "@/components/product/page-primitives";
 import { createClient } from "@/lib/supabase/server";
 import { getOrCreatePrimaryWorkspace } from "@/lib/workspaces";
@@ -6,10 +7,30 @@ import { getWorkspaceRole } from "@/lib/workspace-access";
 import { getWorkspaceSubscription } from "@/lib/billing";
 import { isMissingTableError, toSafeText } from "@/lib/single-send";
 import { logWorkspaceAudit } from "@/lib/audit";
+import { getSiteUrl } from "@/lib/supabase/env";
+import { sendWorkspaceInviteEmail } from "@/lib/team-invitations";
 
 function shortUserId(userId: string) {
   if (userId.length <= 12) return userId;
   return `${userId.slice(0, 8)}...${userId.slice(-4)}`;
+}
+
+function firstHeaderValue(value: string | null) {
+  if (!value) return null;
+  return value.split(",")[0]?.trim() ?? null;
+}
+
+async function getInviteBaseUrl() {
+  const h = await headers();
+  const forwardedHost = firstHeaderValue(h.get("x-forwarded-host"));
+  const host = forwardedHost ?? firstHeaderValue(h.get("host"));
+  const proto = firstHeaderValue(h.get("x-forwarded-proto")) ?? "https";
+
+  if (host) {
+    return `${proto}://${host}`;
+  }
+
+  return getSiteUrl();
 }
 
 export default async function TeamPage({
@@ -22,6 +43,8 @@ export default async function TeamPage({
     typeof params.error === "string" ? decodeURIComponent(params.error) : null;
   const message =
     typeof params.message === "string" ? decodeURIComponent(params.message) : null;
+  const warning =
+    typeof params.warning === "string" ? decodeURIComponent(params.warning) : null;
 
   const supabase = await createClient();
   const {
@@ -186,12 +209,39 @@ export default async function TeamPage({
       },
     });
 
+    const siteUrl = await getInviteBaseUrl();
+    const signupUrl = `${siteUrl}/signup?email=${encodeURIComponent(email)}`;
+    const loginUrl = `${siteUrl}/login?next=${encodeURIComponent("/app")}`;
+    const inviteEmailResult = await sendWorkspaceInviteEmail({
+      recipientEmail: email,
+      role: inviteRole,
+      workspaceName: actionWorkspace.workspaceName,
+      inviterEmail: actionUser.email ?? "workspace owner",
+      signupUrl,
+      loginUrl,
+    });
+
+    if (!inviteEmailResult.sent) {
+      redirect(
+        "/app/team?message=" +
+          encodeURIComponent(
+            existingInvite?.id
+              ? "Existing invite updated."
+              : "Invitation created (pending).",
+          ) +
+          "&warning=" +
+          encodeURIComponent(
+            `Invite email could not be delivered: ${inviteEmailResult.error ?? "unknown error"}`,
+          ),
+      );
+    }
+
     redirect(
       "/app/team?message=" +
         encodeURIComponent(
           existingInvite?.id
-            ? "Existing invite updated."
-            : "Invitation created (pending).",
+            ? "Existing invite updated and email sent."
+            : "Invitation created and email sent.",
         ),
     );
   }
@@ -406,6 +456,11 @@ export default async function TeamPage({
       {message ? (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           {message}
+        </p>
+      ) : null}
+      {warning ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {warning}
         </p>
       ) : null}
 
