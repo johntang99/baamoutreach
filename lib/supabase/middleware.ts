@@ -28,26 +28,14 @@ function isPrefetchRequest(request: NextRequest) {
 
 export async function updateSession(request: NextRequest) {
   if (isPrefetchRequest(request)) {
-    return NextResponse.next({
-      request: {
-        headers: request.headers,
-      },
-    });
+    return NextResponse.next({ request });
   }
 
   if (!hasSupabaseEnv()) {
-    return NextResponse.next({
-      request: {
-        headers: request.headers,
-      },
-    });
+    return NextResponse.next({ request });
   }
 
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  });
+  let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
     getSupabaseUrl(),
@@ -67,11 +55,7 @@ export async function updateSession(request: NextRequest) {
             request.cookies.set({ name, value, ...options }),
           );
 
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          });
+          response = NextResponse.next({ request });
 
           // And attach Set-Cookie so the browser stores the refreshed
           // tokens for the next request.
