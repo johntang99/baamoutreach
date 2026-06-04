@@ -43,8 +43,13 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value),
+          // Mutate the in-flight request first so the downstream RSC /
+          // layout / route handler reads the refreshed tokens through
+          // `cookies()` from next/headers, not the stale ones the browser
+          // originally sent. NextResponse.next({ request }) forwards this
+          // mutated request upstream.
+          cookiesToSet.forEach(({ name, value, options }) =>
+            request.cookies.set({ name, value, ...options }),
           );
 
           response = NextResponse.next({
@@ -53,6 +58,8 @@ export async function updateSession(request: NextRequest) {
             },
           });
 
+          // And attach Set-Cookie so the browser stores the refreshed
+          // tokens for the next request.
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options),
           );
