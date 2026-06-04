@@ -27,9 +27,13 @@ export function hasSupabaseEnv() {
 }
 
 export function getSiteUrl() {
+  const vercelHost =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+
   return (
     process.env.NEXT_PUBLIC_SITE_URL ??
     process.env.SITE_URL ??
+    (vercelHost ? `https://${vercelHost}` : undefined) ??
     "http://localhost:4010"
   );
 }
