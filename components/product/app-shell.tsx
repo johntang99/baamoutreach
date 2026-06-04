@@ -91,12 +91,15 @@ export function AppShell({
               <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500">
                 Role: <strong className="font-semibold text-slate-700">{roleLabel}</strong>
               </span>
-              <Link
-                href="/auth/signout"
-                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-50"
-              >
-                Sign out
-              </Link>
+              <form action="/auth/signout" method="post">
+                <input type="hidden" name="next" value="/login" />
+                <button
+                  type="submit"
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500 hover:bg-slate-50"
+                >
+                  Sign out
+                </button>
+              </form>
             </div>
           </div>
         </header>
