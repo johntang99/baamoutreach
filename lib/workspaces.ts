@@ -28,6 +28,8 @@ export async function getOrCreatePrimaryWorkspace(
   existingClient?: SupabaseClient,
 ): Promise<WorkspaceContext> {
   const supabase = existingClient ?? (await createClient());
+  const admin = createAdminClient();
+  const userEmail = user.email?.trim().toLowerCase();
 
   const { data: membership, error: membershipError } = await supabase
     .from("workspace_memberships")
@@ -55,49 +57,7 @@ export async function getOrCreatePrimaryWorkspace(
 
   const membershipRole = membership?.role as WorkspaceContext["role"] | undefined;
 
-  if (workspaceRecord?.id) {
-    return {
-      workspaceId: workspaceRecord.id as string,
-      workspaceName: (workspaceRecord.name as string) ?? "Workspace",
-      role: membershipRole ?? "viewer",
-    };
-  }
-
-  const admin = createAdminClient();
-  const { data: adminMembership, error: adminMembershipError } = await admin
-    .from("workspace_memberships")
-    .select(
-      `
-        role,
-        workspace:workspaces (
-          id,
-          name
-        )
-      `,
-    )
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (adminMembershipError) {
-    throw adminMembershipError;
-  }
-
-  const adminWorkspaceRecord = Array.isArray(adminMembership?.workspace)
-    ? adminMembership.workspace[0]
-    : adminMembership?.workspace;
-
-  if (adminWorkspaceRecord?.id) {
-    return {
-      workspaceId: adminWorkspaceRecord.id as string,
-      workspaceName: (adminWorkspaceRecord.name as string) ?? "Workspace",
-      role:
-        (adminMembership?.role as WorkspaceContext["role"] | undefined) ?? "viewer",
-    };
-  }
-
-  const userEmail = user.email?.trim().toLowerCase();
+  let acceptedInviteContext: WorkspaceContext | null = null;
   if (userEmail) {
     const { data: invite, error: inviteError } = await admin
       .from("workspace_invitations")
@@ -162,13 +122,58 @@ export async function getOrCreatePrimaryWorkspace(
           ? invite.workspace[0]
           : invite.workspace;
 
-        return {
+        acceptedInviteContext = {
           workspaceId: invite.workspace_id,
           workspaceName: (inviteWorkspace?.name as string) ?? "Workspace",
           role: invite.role as WorkspaceContext["role"],
         };
       }
     }
+  }
+
+  if (workspaceRecord?.id) {
+    return {
+      workspaceId: workspaceRecord.id as string,
+      workspaceName: (workspaceRecord.name as string) ?? "Workspace",
+      role: membershipRole ?? "viewer",
+    };
+  }
+
+  if (acceptedInviteContext) {
+    return acceptedInviteContext;
+  }
+
+  const { data: adminMembership, error: adminMembershipError } = await admin
+    .from("workspace_memberships")
+    .select(
+      `
+        role,
+        workspace:workspaces (
+          id,
+          name
+        )
+      `,
+    )
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (adminMembershipError) {
+    throw adminMembershipError;
+  }
+
+  const adminWorkspaceRecord = Array.isArray(adminMembership?.workspace)
+    ? adminMembership.workspace[0]
+    : adminMembership?.workspace;
+
+  if (adminWorkspaceRecord?.id) {
+    return {
+      workspaceId: adminWorkspaceRecord.id as string,
+      workspaceName: (adminWorkspaceRecord.name as string) ?? "Workspace",
+      role:
+        (adminMembership?.role as WorkspaceContext["role"] | undefined) ?? "viewer",
+    };
   }
 
   const workspaceName = toWorkspaceName(user);

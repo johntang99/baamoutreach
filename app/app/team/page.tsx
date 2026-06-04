@@ -9,10 +9,25 @@ import { isMissingTableError, toSafeText } from "@/lib/single-send";
 import { logWorkspaceAudit } from "@/lib/audit";
 import { getSiteUrl } from "@/lib/supabase/env";
 import { sendWorkspaceInviteEmail } from "@/lib/team-invitations";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 function shortUserId(userId: string) {
   if (userId.length <= 12) return userId;
   return `${userId.slice(0, 8)}...${userId.slice(-4)}`;
+}
+
+function toDisplayName(params: {
+  fullName?: string | null;
+  email?: string | null;
+  userId: string;
+}) {
+  const fullName = params.fullName?.trim();
+  if (fullName) return fullName;
+
+  const email = params.email?.trim();
+  if (email) return email;
+
+  return shortUserId(params.userId);
 }
 
 function firstHeaderValue(value: string | null) {
@@ -417,7 +432,9 @@ export default async function TeamPage({
     redirect("/app/team?message=" + encodeURIComponent("Invitation revoked."));
   }
 
-  const { data: members, error: membersError } = await supabase
+  const admin = createAdminClient();
+
+  const { data: members, error: membersError } = await admin
     .from("workspace_memberships")
     .select("id, user_id, role, created_at")
     .eq("workspace_id", workspace.workspaceId)
@@ -425,7 +442,7 @@ export default async function TeamPage({
 
   if (membersError) throw membersError;
 
-  const { data: invitations, error: invitationsError } = await supabase
+  const { data: invitations, error: invitationsError } = await admin
     .from("workspace_invitations")
     .select("id, email, role, status, expires_at, created_at")
     .eq("workspace_id", workspace.workspaceId)
@@ -437,11 +454,50 @@ export default async function TeamPage({
   }
 
   const teamSchemaMissing = isMissingTableError(invitationsError);
+  const memberProfileByUserId = new Map<
+    string,
+    {
+      displayName: string;
+      email: string | null;
+    }
+  >();
+  if ((members ?? []).length > 0) {
+    const uniqueUserIds = [...new Set((members ?? []).map((member) => member.user_id))];
+    await Promise.all(
+      uniqueUserIds.map(async (userId) => {
+        const { data, error } = await admin.auth.admin.getUserById(userId);
+        if (error || !data.user) {
+          memberProfileByUserId.set(userId, {
+            displayName: toDisplayName({ userId }),
+            email: null,
+          });
+          return;
+        }
+
+        const fullNameRaw = data.user.user_metadata?.full_name;
+        const fullName =
+          typeof fullNameRaw === "string" && fullNameRaw.trim().length > 0
+            ? fullNameRaw
+            : null;
+        const email = data.user.email ?? null;
+        memberProfileByUserId.set(userId, {
+          displayName: toDisplayName({
+            fullName,
+            email,
+            userId,
+          }),
+          email,
+        });
+      }),
+    );
+  }
+
+  const pendingInvitations = (invitations ?? []).filter(
+    (invite) => invite.status === "pending",
+  );
 
   const memberCount = (members ?? []).length;
-  const pendingInviteCount = (invitations ?? []).filter(
-    (invite) => invite.status === "pending",
-  ).length;
+  const pendingInviteCount = pendingInvitations.length;
 
   return (
     <div className="grid gap-3">
@@ -549,7 +605,14 @@ export default async function TeamPage({
                     {(members ?? []).map((member) => (
                       <tr key={member.id}>
                         <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {shortUserId(member.user_id)}
+                          <div className="flex flex-col gap-0.5">
+                            <span>{memberProfileByUserId.get(member.user_id)?.displayName}</span>
+                            {memberProfileByUserId.get(member.user_id)?.email ? (
+                              <span className="text-[10px] text-slate-500">
+                                {memberProfileByUserId.get(member.user_id)?.email}
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
                           {member.role}
@@ -590,7 +653,7 @@ export default async function TeamPage({
           </section>
 
           <SectionCard title="Pending invitations">
-            {(invitations ?? []).length === 0 ? (
+            {pendingInvitations.length === 0 ? (
               <p className="text-sm text-slate-500">No invitations yet.</p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -608,7 +671,7 @@ export default async function TeamPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {(invitations ?? []).map((invite) => (
+                    {pendingInvitations.map((invite) => (
                       <tr key={invite.id}>
                         <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
                           {invite.email}
