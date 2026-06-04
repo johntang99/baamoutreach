@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 function toSafeNextPath(next: string | null) {
   if (!next || !next.startsWith("/")) return "/app";
@@ -51,40 +50,49 @@ export default function AuthCallbackPage() {
         );
       };
 
-      let supabase;
-      try {
-        supabase = createClient();
-      } catch {
-        redirectToLogin("Authentication is not configured for this environment.");
-        return;
-      }
-
       if (queryError || hashError) {
         redirectToLogin(queryError ?? hashError ?? "Authentication failed");
         return;
       }
 
+      const payload: {
+        code?: string;
+        accessToken?: string;
+        refreshToken?: string;
+        nextPath: string;
+      } = { nextPath };
+
       // PKCE / OAuth callback flow.
       if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          redirectToLogin(error.message);
-          return;
-        }
+        payload.code = code;
       } else if (accessToken && refreshToken) {
         // Email confirmation / magic-link flow where tokens arrive in URL hash.
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
-        if (error) {
-          redirectToLogin(error.message);
-          return;
-        }
+        payload.accessToken = accessToken;
+        payload.refreshToken = refreshToken;
+      } else {
+        // No callback payload: bounce to app directly.
+        router.replace(nextPath);
+        return;
+      }
+
+      setStatus("Completing sign-in...");
+      const response = await fetch("/auth/callback/complete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; nextPath?: string }
+        | null;
+      if (!response.ok || !data?.ok) {
+        redirectToLogin(data?.error ?? "Authentication failed");
+        return;
       }
 
       setStatus("Redirecting...");
-      router.replace(nextPath);
+      router.replace(toSafeNextPath(data.nextPath ?? nextPath));
     };
 
     void run();
