@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSiteUrl } from "@/lib/supabase/env";
+import { PasswordField } from "@/components/auth/password-field";
 
 export default async function SignupPage({
   searchParams,
@@ -20,6 +21,14 @@ export default async function SignupPage({
     const fullName = String(formData.get("full_name") ?? "").trim();
     const email = String(formData.get("email") ?? "").trim();
     const password = String(formData.get("password") ?? "");
+
+    if (password.length < 8) {
+      redirect(
+        `/signup?error=${encodeURIComponent(
+          "Password must be at least 8 characters.",
+        )}`,
+      );
+    }
 
     const supabase = await createClient();
     const { data, error } = await supabase.auth.signUp({
@@ -84,16 +93,7 @@ export default async function SignupPage({
               required
             />
           </label>
-          <label className="grid gap-1">
-            <span className="text-xs font-medium text-slate-600">Password</span>
-            <input
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              type="password"
-              name="password"
-              minLength={8}
-              required
-            />
-          </label>
+          <PasswordField name="password" label="Password" minLength={8} required />
           <button
             type="submit"
             className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-blue-700 bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700"

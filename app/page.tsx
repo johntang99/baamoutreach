@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { RootAuthHandoff } from "@/components/auth/root-auth-handoff";
 
 export default function Home() {
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <RootAuthHandoff />
       <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-blue-600">
           BAAM Outreach
