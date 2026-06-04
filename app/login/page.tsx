@@ -20,6 +20,8 @@ export default async function LoginPage({
     typeof params.error === "string" ? decodeURIComponent(params.error) : null;
   const message =
     typeof params.message === "string" ? decodeURIComponent(params.message) : null;
+  const initialEmail =
+    typeof params.email === "string" ? decodeURIComponent(params.email) : "";
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-4 py-10">
@@ -38,7 +40,7 @@ export default async function LoginPage({
             {message}
           </p>
         ) : null}
-        <LoginForm nextPath={nextPath} />
+        <LoginForm nextPath={nextPath} initialEmail={initialEmail} />
         <div className="mt-4 flex items-center justify-between text-xs">
           <Link href="/forgot-password" className="text-blue-600 hover:text-blue-700">
             Forgot password?

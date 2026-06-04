@@ -14,6 +14,8 @@ export default async function SignupPage({
     typeof params.error === "string" ? decodeURIComponent(params.error) : null;
   const message =
     typeof params.message === "string" ? decodeURIComponent(params.message) : null;
+  const initialEmail =
+    typeof params.email === "string" ? decodeURIComponent(params.email) : "";
 
   async function signUp(formData: FormData) {
     "use server";
@@ -90,6 +92,8 @@ export default async function SignupPage({
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
               type="email"
               name="email"
+              defaultValue={initialEmail}
+              autoComplete="email"
               required
             />
           </label>

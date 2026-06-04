@@ -6,11 +6,12 @@ import { createClient } from "@/lib/supabase/client";
 
 interface LoginFormProps {
   nextPath: string;
+  initialEmail?: string;
 }
 
-export function LoginForm({ nextPath }: LoginFormProps) {
+export function LoginForm({ nextPath, initialEmail = "" }: LoginFormProps) {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 

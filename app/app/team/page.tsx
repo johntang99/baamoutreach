@@ -210,8 +210,10 @@ export default async function TeamPage({
     });
 
     const siteUrl = await getInviteBaseUrl();
-    const signupUrl = `${siteUrl}/signup?email=${encodeURIComponent(email)}`;
-    const loginUrl = `${siteUrl}/login?next=${encodeURIComponent("/app")}`;
+    const signupPath = `/signup?email=${encodeURIComponent(email)}&invite=1`;
+    const loginPath = `/login?next=${encodeURIComponent("/app")}&email=${encodeURIComponent(email)}&invite=1`;
+    const signupUrl = `${siteUrl}/auth/switch-account?next=${encodeURIComponent(signupPath)}`;
+    const loginUrl = `${siteUrl}/auth/switch-account?next=${encodeURIComponent(loginPath)}`;
     const inviteEmailResult = await sendWorkspaceInviteEmail({
       recipientEmail: email,
       role: inviteRole,
