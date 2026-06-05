@@ -2,11 +2,15 @@ import {
   PageHeader,
   SectionCard,
 } from "@/components/product/page-primitives";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getOrCreatePrimaryWorkspace } from "@/lib/workspaces";
 import { isMissingTableError, toSafeText } from "@/lib/single-send";
 import { logWorkspaceAudit } from "@/lib/audit";
+import { TemplateLibraryTable } from "@/components/templates/template-library-table";
+import { TemplateStarterGrid } from "@/components/templates/template-starter-grid";
+import { TemplateAiGenerator } from "@/components/templates/template-ai-generator";
 
 export default async function TemplatesPage({
   searchParams,
@@ -18,6 +22,10 @@ export default async function TemplatesPage({
     typeof params.error === "string" ? decodeURIComponent(params.error) : null;
   const message =
     typeof params.message === "string" ? decodeURIComponent(params.message) : null;
+  const activeTab =
+    params.tab === "starters" || params.tab === "ai" ? params.tab : "library";
+  const openTemplateId =
+    typeof params.templateId === "string" ? params.templateId : null;
 
   const supabase = await createClient();
   const {
@@ -97,13 +105,15 @@ export default async function TemplatesPage({
     });
 
     redirect(
-      "/app/templates?message=" + encodeURIComponent("Template created."),
+      "/app/templates?tab=library&message=" + encodeURIComponent("Template created."),
     );
   }
 
   const { data: templates, error: templatesError } = await supabase
     .from("templates")
-    .select("id, name, campaign_type, subject_template, is_active, created_at")
+    .select(
+      "id, name, campaign_type, subject_template, body_template, is_active, created_at",
+    )
     .eq("workspace_id", workspace.workspaceId)
     .order("created_at", { ascending: false })
     .limit(200);
@@ -139,102 +149,110 @@ export default async function TemplatesPage({
           </p>
         </SectionCard>
       ) : (
-        <section className="grid gap-3 xl:grid-cols-[1fr_1.25fr]">
-          <SectionCard title="Create template">
-            <form action={createTemplate} className="grid gap-3">
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-slate-600">Name</span>
-                <input
-                  name="name"
-                  type="text"
-                  required
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-slate-600">Campaign type</span>
-                <input
-                  name="campaign_type"
-                  type="text"
-                  placeholder="business_intro"
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-slate-600">Subject template</span>
-                <input
-                  name="subject_template"
-                  type="text"
-                  required
-                  placeholder="{first_name}, quick intro from BAAM Outreach"
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-slate-600">Body template</span>
-                <textarea
-                  name="body_template"
-                  required
-                  rows={6}
-                  placeholder={"Hi {first_name},\n\n..."}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                />
-              </label>
-              <button
-                type="submit"
-                className="inline-flex h-9 items-center justify-center rounded-lg border border-blue-700 bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700"
+        <div className="grid gap-3">
+          <SectionCard title="Template workspace">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href="/app/templates?tab=library"
+                className={`inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-semibold ${
+                  activeTab === "library"
+                    ? "border-blue-700 bg-blue-600 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
               >
-                Save template
-              </button>
-            </form>
+                My templates
+              </Link>
+              <Link
+                href="/app/templates?tab=starters"
+                className={`inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-semibold ${
+                  activeTab === "starters"
+                    ? "border-blue-700 bg-blue-600 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Starter library
+              </Link>
+              <Link
+                href="/app/templates?tab=ai"
+                className={`inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-semibold ${
+                  activeTab === "ai"
+                    ? "border-blue-700 bg-blue-600 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                AI generator
+              </Link>
+            </div>
           </SectionCard>
 
-          <SectionCard title="Template library">
-            {(templates ?? []).length === 0 ? (
-              <p className="text-sm text-slate-500">
-                No templates yet. Create one to unlock single send.
-              </p>
-            ) : (
-              <div className="overflow-hidden rounded-xl border border-slate-200">
-                <table className="w-full border-collapse text-xs">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      {["Name", "Type", "Subject", "Active", "Created"].map((header) => (
-                        <th
-                          key={header}
-                          className="border-b border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500"
-                        >
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(templates ?? []).map((template) => (
-                      <tr key={template.id}>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {template.name}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {template.campaign_type}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {template.subject_template}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {template.is_active ? "Yes" : "No"}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-500">
-                          {new Date(template.created_at).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
-        </section>
+          {activeTab === "starters" ? (
+            <SectionCard title="Starter library">
+              <TemplateStarterGrid />
+            </SectionCard>
+          ) : activeTab === "ai" ? (
+            <SectionCard title="AI template generator">
+              <TemplateAiGenerator />
+            </SectionCard>
+          ) : (
+            <section className="grid gap-3 xl:grid-cols-[1fr_1.25fr]">
+              <SectionCard title="Create template">
+                <form action={createTemplate} className="grid gap-3">
+                  <label className="grid gap-1">
+                    <span className="text-xs font-medium text-slate-600">Name</span>
+                    <input
+                      name="name"
+                      type="text"
+                      required
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-xs font-medium text-slate-600">Campaign type</span>
+                    <input
+                      name="campaign_type"
+                      type="text"
+                      placeholder="business_intro"
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-xs font-medium text-slate-600">Subject template</span>
+                    <input
+                      name="subject_template"
+                      type="text"
+                      required
+                      placeholder="{first_name}, quick intro from BAAM Outreach"
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-xs font-medium text-slate-600">Body template</span>
+                    <textarea
+                      name="body_template"
+                      required
+                      rows={6}
+                      placeholder={"Hi {first_name},\n\n..."}
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="inline-flex h-9 items-center justify-center rounded-lg border border-blue-700 bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700"
+                  >
+                    Save template
+                  </button>
+                </form>
+              </SectionCard>
+
+              <SectionCard title="Template library">
+                <TemplateLibraryTable
+                  templates={templates ?? []}
+                  initialOpenTemplateId={openTemplateId}
+                />
+              </SectionCard>
+            </section>
+          )}
+        </div>
       )}
     </div>
   );

@@ -1,13 +1,9 @@
 import Link from "next/link";
-import {
-  PageHeader,
-  SectionCard,
-} from "@/components/product/page-primitives";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { getOrCreatePrimaryWorkspace } from "@/lib/workspaces";
-import { isMissingTableError, toSafeText } from "@/lib/single-send";
-import { getWorkspacePolicyDefaults } from "@/lib/policies";
+import { CampaignDetailActions } from "@/components/campaigns/campaign-detail-actions";
+import { CampaignRecipientTable } from "@/components/campaigns/campaign-recipient-table";
+import { CampaignSetupForm } from "@/components/campaigns/campaign-setup-form";
+import { PageHeader, SectionCard } from "@/components/product/page-primitives";
 import { logWorkspaceAudit } from "@/lib/audit";
 import { getWorkspaceSubscription } from "@/lib/billing";
 import {
@@ -16,6 +12,10 @@ import {
   normalizeIntervalRange,
   scheduledAtForIndex,
 } from "@/lib/campaigns";
+import { getWorkspacePolicyDefaults } from "@/lib/policies";
+import { isMissingTableError, toSafeText } from "@/lib/single-send";
+import { createClient } from "@/lib/supabase/server";
+import { getOrCreatePrimaryWorkspace } from "@/lib/workspaces";
 
 export default async function CampaignsPage({
   searchParams,
@@ -28,6 +28,8 @@ export default async function CampaignsPage({
   const message =
     typeof params.message === "string" ? decodeURIComponent(params.message) : null;
   const preselectedListId = typeof params.listId === "string" ? params.listId : "";
+  const activeCampaignIdParam =
+    typeof params.campaignId === "string" ? params.campaignId : "";
 
   const supabase = await createClient();
   const {
@@ -45,20 +47,19 @@ export default async function CampaignsPage({
 
     const name = toSafeText(formData.get("name"));
     const templateId = toSafeText(formData.get("template_id"));
-    const sourceListIdInput = toSafeText(formData.get("source_list_id"));
-    const sourceListId =
-      sourceListIdInput && sourceListIdInput !== "__all__" ? sourceListIdInput : null;
-    const includeRoleEmails =
-      String(formData.get("include_role_emails")) === "on";
+    const sourceListId = toSafeText(formData.get("source_list_id"));
+    const includeRoleEmails = String(formData.get("include_role_emails")) === "on";
     const dailyCapInput = Number(formData.get("daily_cap") ?? NaN);
     const hardCapInput = Number(formData.get("hard_cap") ?? NaN);
     const minIntervalInputRaw = Number(formData.get("min_interval_seconds") ?? NaN);
     const maxIntervalInputRaw = Number(formData.get("max_interval_seconds") ?? NaN);
 
-    if (!name || !templateId) {
+    if (!name || !templateId || !sourceListId) {
       redirect(
         "/app/campaigns?error=" +
-          encodeURIComponent("Campaign name and template are required."),
+          encodeURIComponent(
+            "Campaign name, template, and one recipient list are required.",
+          ),
       );
     }
 
@@ -155,117 +156,74 @@ export default async function CampaignsPage({
       );
     }
 
-    let sourceList:
-      | {
-          id: string;
-          name: string;
-          defaultLanguage: string;
-          variantsTemplateId: string | null;
-          templateVariants: Array<{ subject: string; body: string; tone: string }>;
-        }
-      | null = null;
+    const { data: selectedList, error: selectedListError } = await serverSupabase
+      .from("audience_lists")
+      .select("id, name, default_language, variants_template_id, template_variants")
+      .eq("id", sourceListId)
+      .eq("workspace_id", actionWorkspace.workspaceId)
+      .eq("status", "ready")
+      .maybeSingle();
 
-    type SourceRecipient = {
-      sourceId: string;
-      contactId: string | null;
-      fullName: string;
-      email: string;
-      companyName: string | null;
-      language: string;
-      preSuppressed: boolean;
-    };
-
-    let sourceRecipients: SourceRecipient[] = [];
-    if (sourceListId) {
-      const { data: selectedList, error: selectedListError } = await serverSupabase
-        .from("audience_lists")
-        .select("id, name, default_language, variants_template_id, template_variants")
-        .eq("id", sourceListId)
-        .eq("workspace_id", actionWorkspace.workspaceId)
-        .eq("status", "ready")
-        .maybeSingle();
-
-      if (selectedListError) {
-        if (isMissingTableError(selectedListError)) {
-          redirect(
-            "/app/campaigns?error=" +
-              encodeURIComponent(
-                "Run supabase/migrations/0008_lists_mvp.sql first.",
-              ),
-          );
-        }
-        redirect(
-          "/app/campaigns?error=" + encodeURIComponent(selectedListError.message),
-        );
-      }
-
-      if (!selectedList) {
+    if (selectedListError) {
+      if (isMissingTableError(selectedListError)) {
         redirect(
           "/app/campaigns?error=" +
-            encodeURIComponent("Selected list not found or not ready."),
+            encodeURIComponent("Run supabase/migrations/0008_lists_mvp.sql first."),
         );
       }
+      redirect(
+        "/app/campaigns?error=" + encodeURIComponent(selectedListError.message),
+      );
+    }
 
-      sourceList = {
-        id: selectedList.id,
-        name: selectedList.name,
-        defaultLanguage: selectedList.default_language,
-        variantsTemplateId: selectedList.variants_template_id,
-        templateVariants: Array.isArray(selectedList.template_variants)
-          ? (selectedList.template_variants as Array<{
-              subject: string;
-              body: string;
-              tone: string;
-            }>)
-          : [],
-      };
-      const { data: listEntries, error: listEntriesError } = await serverSupabase
-        .from("audience_list_entries")
-        .select("id, contact_id, full_name, email, company_name, language, is_suppressed")
-        .eq("workspace_id", actionWorkspace.workspaceId)
-        .eq("list_id", selectedList.id)
-        .order("created_at", { ascending: true })
-        .limit(Math.min(hardCap * 3, 5000));
+    if (!selectedList) {
+      redirect(
+        "/app/campaigns?error=" +
+          encodeURIComponent("Selected list not found or not ready."),
+      );
+    }
 
-      if (listEntriesError) {
-        redirect(
-          "/app/campaigns?error=" + encodeURIComponent(listEntriesError.message),
-        );
-      }
+    const sourceList = {
+      id: selectedList.id,
+      name: selectedList.name,
+      defaultLanguage: selectedList.default_language,
+      variantsTemplateId: selectedList.variants_template_id,
+      templateVariants: Array.isArray(selectedList.template_variants)
+        ? (selectedList.template_variants as Array<{
+            subject: string;
+            body: string;
+            tone: string;
+          }>)
+        : [],
+    };
 
-      sourceRecipients = (listEntries ?? []).map((entry) => ({
-        sourceId: entry.id,
-        contactId: entry.contact_id,
-        fullName: entry.full_name,
-        email: entry.email,
-        companyName: entry.company_name,
-        language: entry.language,
-        preSuppressed: entry.is_suppressed,
-      }));
-    } else {
-      const { data: contacts, error: contactsError } = await serverSupabase
-        .from("contacts")
-        .select("id, full_name, email, company_name")
-        .eq("workspace_id", actionWorkspace.workspaceId)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(Math.min(hardCap * 3, 2000));
+    const { data: listEntries, error: listEntriesError } = await serverSupabase
+      .from("audience_list_entries")
+      .select("id, contact_id, full_name, email, company_name, language, is_suppressed")
+      .eq("workspace_id", actionWorkspace.workspaceId)
+      .eq("list_id", selectedList.id)
+      .order("created_at", { ascending: true })
+      .limit(Math.min(hardCap * 3, 5000));
 
-      if (contactsError) {
-        redirect(
-          "/app/campaigns?error=" + encodeURIComponent(contactsError.message),
-        );
-      }
+    if (listEntriesError) {
+      redirect("/app/campaigns?error=" + encodeURIComponent(listEntriesError.message));
+    }
 
-      sourceRecipients = (contacts ?? []).map((contact) => ({
-        sourceId: contact.id,
-        contactId: contact.id,
-        fullName: contact.full_name,
-        email: contact.email,
-        companyName: contact.company_name,
-        language: "en",
-        preSuppressed: false,
-      }));
+    const sourceRecipients = (listEntries ?? []).map((entry) => ({
+      sourceId: entry.id,
+      contactId: entry.contact_id,
+      fullName: entry.full_name,
+      email: entry.email,
+      companyName: entry.company_name,
+      language: entry.language,
+      preSuppressed: entry.is_suppressed,
+    }));
+
+    if (sourceRecipients.length === 0) {
+      redirect(
+        "/app/campaigns?error=" +
+          encodeURIComponent("Selected list has no recipients to prepare."),
+      );
     }
 
     const { data: suppressionRows, error: suppressionError } = await serverSupabase
@@ -274,9 +232,7 @@ export default async function CampaignsPage({
       .eq("workspace_id", actionWorkspace.workspaceId);
 
     if (suppressionError) {
-      redirect(
-        "/app/campaigns?error=" + encodeURIComponent(suppressionError.message),
-      );
+      redirect("/app/campaigns?error=" + encodeURIComponent(suppressionError.message));
     }
 
     const suppressionSet = new Set(
@@ -288,7 +244,7 @@ export default async function CampaignsPage({
       .insert({
         workspace_id: actionWorkspace.workspaceId,
         name,
-        source_list_id: sourceList?.id ?? null,
+        source_list_id: sourceList.id,
         template_id: template.id,
         status: "draft",
         daily_cap: dailyCap,
@@ -317,16 +273,14 @@ export default async function CampaignsPage({
 
     const variantAssignment = new Map<number, number>();
     const activeVariants =
-      sourceList &&
-      sourceList.variantsTemplateId === template.id &&
-      sourceList.templateVariants.length > 0
+      sourceList.variantsTemplateId === template.id && sourceList.templateVariants.length > 0
         ? sourceList.templateVariants
         : [];
 
-    if (sourceList && activeVariants.length > 0) {
+    if (activeVariants.length > 0) {
       const eligibleIndices: number[] = [];
       sourceRecipients.forEach((recipient, index) => {
-        if (recipient.language === sourceList?.defaultLanguage) {
+        if (recipient.language === sourceList.defaultLanguage) {
           eligibleIndices.push(index);
         }
       });
@@ -405,9 +359,7 @@ export default async function CampaignsPage({
       }
 
       const risk = campaignRecipientRisk(email, includeRoleEmails);
-      const shouldQueue = risk.shouldQueue;
-
-      if (!shouldQueue) {
+      if (!risk.shouldQueue) {
         skippedCount += 1;
         recipients.push({
           workspace_id: actionWorkspace.workspaceId,
@@ -463,9 +415,7 @@ export default async function CampaignsPage({
       .insert(recipients);
 
     if (recipientsError) {
-      redirect(
-        "/app/campaigns?error=" + encodeURIComponent(recipientsError.message),
-      );
+      redirect("/app/campaigns?error=" + encodeURIComponent(recipientsError.message));
     }
 
     const nextStatus = queuedCount > 0 ? "ready" : "completed";
@@ -488,7 +438,7 @@ export default async function CampaignsPage({
         queued_count: queuedCount,
         skipped_count: skippedCount,
         include_role_emails: includeRoleEmails,
-        source_list_id: sourceList?.id ?? null,
+        source_list_id: sourceList.id,
         variant_applied_count: variantAppliedCount,
       },
       created_by: actionUser.id,
@@ -501,25 +451,23 @@ export default async function CampaignsPage({
       entityType: "campaign",
       entityId: campaign.id,
       metadata: {
-        totalContacts: totalContacts,
-        queuedCount: queuedCount,
-        skippedCount: skippedCount,
+        totalContacts,
+        queuedCount,
+        skippedCount,
         includeRoleEmails,
         dailyCap,
         hardCap,
         minIntervalSeconds: interval.min,
         maxIntervalSeconds: interval.max,
-        sourceListId: sourceList?.id ?? null,
-        sourceListName: sourceList?.name ?? "active_contacts",
+        sourceListId: sourceList.id,
+        sourceListName: sourceList.name,
         variantAppliedCount,
-        variantsSourceTemplateMatched: sourceList
-          ? sourceList.variantsTemplateId === template.id
-          : false,
+        variantsSourceTemplateMatched: sourceList.variantsTemplateId === template.id,
       },
     });
 
     redirect(
-      "/app/campaigns?message=" +
+      `/app/campaigns?campaignId=${campaign.id}&message=` +
         encodeURIComponent(
           `Campaign prepared with ${queuedCount} queued and ${skippedCount} skipped recipients.`,
         ),
@@ -532,7 +480,9 @@ export default async function CampaignsPage({
       `
         id,
         name,
+        source_list_id,
         source_list:audience_lists (
+          id,
           name
         ),
         status,
@@ -543,9 +493,13 @@ export default async function CampaignsPage({
         sent_count,
         daily_cap,
         hard_cap,
+        min_interval_seconds,
+        max_interval_seconds,
         created_at,
         template:templates (
-          name
+          id,
+          name,
+          campaign_type
         )
       `,
     )
@@ -555,7 +509,7 @@ export default async function CampaignsPage({
 
   const { data: templates, error: templatesError } = await supabase
     .from("templates")
-    .select("id, name, campaign_type")
+    .select("id, name, campaign_type, subject_template, body_template")
     .eq("workspace_id", workspace.workspaceId)
     .eq("is_active", true)
     .order("created_at", { ascending: false })
@@ -563,7 +517,7 @@ export default async function CampaignsPage({
 
   const { data: readyLists, error: readyListsError } = await supabase
     .from("audience_lists")
-    .select("id, name, ready_row_count, variants_template_id, template_variants")
+    .select("id, name, ready_row_count, template_variants")
     .eq("workspace_id", workspace.workspaceId)
     .eq("status", "ready")
     .order("created_at", { ascending: false })
@@ -583,11 +537,66 @@ export default async function CampaignsPage({
   const policyDefaults = await getWorkspacePolicyDefaults(workspace.workspaceId);
   const subscription = await getWorkspaceSubscription(workspace.workspaceId, supabase);
 
+  const activeCampaign =
+    safeCampaigns.find((campaign) => campaign.id === activeCampaignIdParam) ??
+    safeCampaigns[0] ??
+    null;
+
+  const { data: campaignRecipients, error: campaignRecipientsError } = activeCampaign
+    ? await supabase
+        .from("campaign_recipients")
+        .select(
+          "id, full_name, email, status, risk_level, risk_notes, variant_index, scheduled_at, opened_at, sent_at, gmail_compose_url",
+        )
+        .eq("campaign_id", activeCampaign.id)
+        .order("created_at", { ascending: true })
+        .limit(500)
+    : { data: [], error: null };
+
+  if (campaignRecipientsError && !isMissingTableError(campaignRecipientsError)) {
+    throw campaignRecipientsError;
+  }
+
+  const safeRecipients = campaignRecipients ?? [];
+
+  const initialOpenedRecipient = [...safeRecipients]
+    .filter((recipient) => recipient.status === "opened_gmail")
+    .sort(
+      (a, b) =>
+        new Date(b.opened_at ?? 0).getTime() - new Date(a.opened_at ?? 0).getTime(),
+    )[0];
+
+  const initialLastSentRecipient = [...safeRecipients]
+    .filter((recipient) => recipient.status === "sent")
+    .sort(
+      (a, b) =>
+        new Date(b.sent_at ?? 0).getTime() - new Date(a.sent_at ?? 0).getTime(),
+    )[0];
+
+  const sourceListInfo = activeCampaign
+    ? Array.isArray(activeCampaign.source_list)
+      ? activeCampaign.source_list[0]
+      : activeCampaign.source_list
+    : null;
+  const templateInfo = activeCampaign
+    ? Array.isArray(activeCampaign.template)
+      ? activeCampaign.template[0]
+      : activeCampaign.template
+    : null;
+
   return (
     <div className="grid gap-3">
       <PageHeader
         title="Campaigns"
-        description="Bulk campaign index with status, pacing policy, and release controls."
+        description="Single-page campaign workflow: prepare from one list, send in Gmail, and mark sent without switching screens."
+        actions={
+          <Link
+            href="/app/docs"
+            className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            View setup guide
+          </Link>
+        }
       />
 
       {errorMessage ? (
@@ -598,6 +607,15 @@ export default async function CampaignsPage({
       {message ? (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           {message}
+        </p>
+      ) : null}
+      {listsMissing ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Lists table not ready yet. Run
+          <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs">
+            supabase/migrations/0008_lists_mvp.sql
+          </code>
+          to enable single-list campaign source.
         </p>
       ) : null}
 
@@ -613,240 +631,154 @@ export default async function CampaignsPage({
         </SectionCard>
       ) : (
         <>
-          <section className="grid gap-3 xl:grid-cols-[1fr_1.3fr]">
-            <SectionCard title="Create campaign">
-              <form action={createCampaign} className="grid gap-3">
-                <label className="grid gap-1">
-                  <span className="text-xs font-medium text-slate-600">Campaign name</span>
-                  <input
-                    name="name"
-                    type="text"
-                    required
-                    placeholder="TCM NYC Batch A"
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </label>
-
-                <label className="grid gap-1">
-                  <span className="text-xs font-medium text-slate-600">Template</span>
-                  <select
-                    name="template_id"
-                    required
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    {safeTemplates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name} ({template.campaign_type})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="grid gap-1">
-                  <span className="text-xs font-medium text-slate-600">Recipient source</span>
-                  <select
-                    name="source_list_id"
-                    defaultValue={
-                      preselectedListId && safeLists.some((list) => list.id === preselectedListId)
-                        ? preselectedListId
-                        : "__all__"
-                    }
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="__all__">All active contacts</option>
-                    {safeLists.map((list) => (
-                      <option key={list.id} value={list.id}>
-                        {list.name} ({list.ready_row_count} ready
-                        {Array.isArray(list.template_variants) &&
-                        list.template_variants.length > 0
-                          ? ", AI variants ready"
-                          : ""}
-                        )
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="grid gap-1">
-                    <span className="text-xs font-medium text-slate-600">Daily cap</span>
-                    <input
-                      name="daily_cap"
-                      type="number"
-                      min={1}
-                      max={subscription.campaignDailyLimit}
-                      defaultValue={Math.min(
-                        policyDefaults.recommendedDailyCap,
-                        subscription.campaignDailyLimit,
-                      )}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-                  <label className="grid gap-1">
-                    <span className="text-xs font-medium text-slate-600">Hard cap</span>
-                    <input
-                      name="hard_cap"
-                      type="number"
-                      min={1}
-                      max={subscription.hardCapLimit}
-                      defaultValue={Math.min(
-                        policyDefaults.hardDailyCap,
-                        subscription.hardCapLimit,
-                      )}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="grid gap-1">
-                    <span className="text-xs font-medium text-slate-600">Min interval (sec)</span>
-                    <input
-                      name="min_interval_seconds"
-                      type="number"
-                      min={30}
-                      defaultValue={policyDefaults.minIntervalSeconds}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-                  <label className="grid gap-1">
-                    <span className="text-xs font-medium text-slate-600">Max interval (sec)</span>
-                    <input
-                      name="max_interval_seconds"
-                      type="number"
-                      min={30}
-                      defaultValue={policyDefaults.maxIntervalSeconds}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
-                  </label>
-                </div>
-
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <input
-                    name="include_role_emails"
-                    type="checkbox"
-                    defaultChecked={policyDefaults.allowRoleBasedRecipients}
-                  />
-                  Include role-based mailboxes (info@, contact@, admin@)
-                </label>
-
+          {safeCampaigns.length > 0 ? (
+            <SectionCard title="Active campaign session">
+              <form method="get" className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <select
+                  name="campaignId"
+                  defaultValue={activeCampaign?.id}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  {safeCampaigns.map((campaign) => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.name} ({campaign.status})
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="submit"
-                  className="inline-flex h-9 items-center justify-center rounded-lg border border-blue-700 bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700"
-                  disabled={safeTemplates.length === 0}
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                 >
-                  Prepare campaign queue
+                  Load campaign
                 </button>
               </form>
             </SectionCard>
+          ) : null}
 
-            <SectionCard title="Preparation notes">
-              <ul className="space-y-2 text-sm text-slate-600">
-                <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  Plan {subscription.planTier}: daily cap up to{" "}
-                  {subscription.campaignDailyLimit}, hard cap up to {subscription.hardCapLimit}.
-                </li>
-                <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  Source can be all active contacts or one ready list snapshot.
-                  {listsMissing ? " (Lists table not ready yet.)" : ""}
-                </li>
-                <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  Queue uses the selected source rows only.
-                </li>
-                <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  If a source list has AI variants generated from the same template,
-                  queued recipients auto-rotate across those variants.
-                </li>
-                <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  Suppressed contacts are auto-skipped.
-                </li>
-                <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  Role-based mailboxes are skipped unless override is enabled.
-                </li>
-                <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  Gmail compose URLs are generated per recipient and stored in queue.
-                </li>
-              </ul>
+          <section className="grid gap-3 xl:grid-cols-[1fr_1.3fr]">
+            <SectionCard title="Campaign setup">
+              <CampaignSetupForm
+                templates={safeTemplates}
+                readyLists={safeLists}
+                preselectedListId={preselectedListId}
+                defaultDailyCap={Math.min(
+                  policyDefaults.recommendedDailyCap,
+                  subscription.campaignDailyLimit,
+                )}
+                defaultHardCap={Math.min(
+                  policyDefaults.hardDailyCap,
+                  subscription.hardCapLimit,
+                )}
+                defaultMinIntervalSeconds={policyDefaults.minIntervalSeconds}
+                defaultMaxIntervalSeconds={policyDefaults.maxIntervalSeconds}
+                defaultAllowRoleBasedRecipients={policyDefaults.allowRoleBasedRecipients}
+                maxDailyCap={subscription.campaignDailyLimit}
+                maxHardCap={subscription.hardCapLimit}
+                createCampaignAction={createCampaign}
+              />
+            </SectionCard>
+
+            <SectionCard title="Send actions (same page)">
+              {activeCampaign ? (
+                <CampaignDetailActions
+                  campaignId={activeCampaign.id}
+                  initialQueuedCount={activeCampaign.queued_count ?? 0}
+                  minIntervalSeconds={activeCampaign.min_interval_seconds ?? 90}
+                  maxIntervalSeconds={activeCampaign.max_interval_seconds ?? 120}
+                  initialStatus={activeCampaign.status}
+                  initialOpenedRecipient={
+                    initialOpenedRecipient
+                      ? {
+                          id: initialOpenedRecipient.id,
+                          fullName:
+                            initialOpenedRecipient.full_name ??
+                            initialOpenedRecipient.email,
+                          email: initialOpenedRecipient.email,
+                        }
+                      : null
+                  }
+                  initialLastSentRecipient={
+                    initialLastSentRecipient
+                      ? {
+                          fullName:
+                            initialLastSentRecipient.full_name ??
+                            initialLastSentRecipient.email,
+                          email: initialLastSentRecipient.email,
+                          sentAt: initialLastSentRecipient.sent_at ?? new Date().toISOString(),
+                        }
+                      : null
+                  }
+                />
+              ) : (
+                <p className="text-sm text-slate-500">
+                  No prepared campaign yet. Configure setup and click
+                  <span className="mx-1 font-semibold text-slate-700">
+                    Save + Prepare recipients
+                  </span>
+                  first.
+                </p>
+              )}
             </SectionCard>
           </section>
 
-          <SectionCard title="Campaign queue">
-            {safeCampaigns.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                No campaigns yet. Create your first campaign above.
-              </p>
-            ) : (
-              <div className="overflow-hidden rounded-xl border border-slate-200">
-                <table className="w-full border-collapse text-xs">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      {[
-                        "Campaign",
-                        "Source",
-                        "Template",
-                        "Queued",
-                        "Skipped",
-                        "Opened",
-                        "Sent",
-                        "Status",
-                        "Action",
-                      ].map((header) => (
-                        <th
-                          key={header}
-                          className="border-b border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500"
-                        >
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {safeCampaigns.map((campaign) => (
-                      <tr key={campaign.id}>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {campaign.name}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {Array.isArray(campaign.source_list)
-                            ? campaign.source_list[0]?.name ?? "All contacts"
-                            : (campaign.source_list as { name?: string } | null)?.name ??
-                              "All contacts"}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {Array.isArray(campaign.template)
-                            ? campaign.template[0]?.name ?? "-"
-                            : (campaign.template as { name?: string } | null)?.name ?? "-"}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {campaign.queued_count}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {campaign.skipped_count}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {campaign.opened_count}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {campaign.sent_count}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
-                          {campaign.status}
-                        </td>
-                        <td className="border-b border-slate-200 px-3 py-2">
-                          <Link
-                            href={`/app/campaigns/${campaign.id}`}
-                            className="font-medium text-blue-600 hover:text-blue-700"
-                          >
-                            View detail
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
+          {activeCampaign ? (
+            <>
+              <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <article className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Status
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                    {activeCampaign.status}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Template: {templateInfo?.name ?? "-"}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Source: {sourceListInfo?.name ?? "-"}
+                  </p>
+                </article>
+                <article className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Queued / Skipped
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                    {activeCampaign.queued_count} / {activeCampaign.skipped_count}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Total contacts: {activeCampaign.total_contacts}
+                  </p>
+                </article>
+                <article className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Opened / Sent
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                    {activeCampaign.opened_count} / {activeCampaign.sent_count}
+                  </p>
+                  <p className="text-[11px] text-slate-500">Manual Gmail progression</p>
+                </article>
+                <article className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Pacing
+                  </p>
+                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                    {activeCampaign.min_interval_seconds}s-{activeCampaign.max_interval_seconds}s
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Daily cap {activeCampaign.daily_cap}, hard cap {activeCampaign.hard_cap}
+                  </p>
+                </article>
+              </section>
+
+              <SectionCard title={`Recipient list: ${activeCampaign.name}`}>
+                <CampaignRecipientTable
+                  campaignId={activeCampaign.id}
+                  recipients={safeRecipients}
+                />
+              </SectionCard>
+            </>
+          ) : null}
         </>
       )}
     </div>

@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BAAM Campaign Single-Page Mock</title>
+    <style>
+      :root {
+        --bg: #f4f6fb;
+        --card: #ffffff;
+        --line: #dce2ef;
+        --text: #111827;
+        --muted: #6b7280;
+        --primary: #2563eb;
+        --primary-strong: #1d4ed8;
+        --success: #047857;
+        --warning: #b45309;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.4 Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      .container {
+        max-width: 1280px;
+        margin: 24px auto;
+        padding: 0 16px 40px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+
+      .header {
+        padding: 16px;
+      }
+
+      .title {
+        font-size: 28px;
+        margin: 0 0 6px;
+      }
+
+      .subtitle {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .stats {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      }
+
+      .stat {
+        padding: 12px;
+      }
+
+      .stat p {
+        margin: 0;
+      }
+
+      .stat .label {
+        color: var(--muted);
+        text-transform: uppercase;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+      }
+
+      .stat .value {
+        margin-top: 6px;
+        font-size: 24px;
+        font-weight: 700;
+      }
+
+      .layout {
+        grid-template-columns: 1.1fr 1.4fr;
+      }
+
+      .panel {
+        padding: 14px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+
+      .field-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .field-help {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .field label {
+        color: #334155;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .input,
+      .select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 14px;
+        background: #fff;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+        color: #334155;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      button,
+      .link-btn {
+        height: 36px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #fff;
+        padding: 0 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .primary {
+        border-color: var(--primary-strong);
+        background: var(--primary);
+        color: #fff;
+      }
+
+      .primary:hover {
+        background: var(--primary-strong);
+      }
+
+      .muted-box {
+        border: 1px dashed #c7d2fe;
+        border-radius: 10px;
+        background: #eef2ff;
+        padding: 10px;
+        color: #3730a3;
+        font-size: 12px;
+      }
+
+      .muted-box strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .table-wrap {
+        overflow: auto;
+        border-top: 1px solid var(--line);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 960px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid #edf1f7;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      th {
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 10px;
+        color: var(--muted);
+        background: #f8fafc;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .status-queued {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+
+      .status-opened {
+        background: #dcfce7;
+        color: var(--success);
+      }
+
+      .status-sent {
+        background: #ecfeff;
+        color: #0f766e;
+      }
+
+      .status-skipped {
+        background: #fff7ed;
+        color: var(--warning);
+      }
+
+      dialog {
+        width: min(680px, calc(100vw - 24px));
+        border: none;
+        border-radius: 12px;
+        padding: 0;
+      }
+
+      .modal {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+
+      .modal header {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .modal main {
+        padding: 16px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .note {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: #f8fafc;
+        color: #334155;
+      }
+
+      .preview-content {
+        margin: 4px 0 0;
+        white-space: pre-wrap;
+        line-height: 1.45;
+        color: #0f172a;
+      }
+
+      .sent-feedback {
+        margin-top: 10px;
+        border: 1px solid #c7d2fe;
+        border-radius: 10px;
+        background: #eef2ff;
+        padding: 10px;
+      }
+
+      .sent-feedback strong {
+        display: block;
+        font-size: 12px;
+        color: #3730a3;
+      }
+
+      .sent-feedback p {
+        margin: 4px 0 0;
+        font-size: 13px;
+        color: #1e1b4b;
+      }
+
+      .prepared-state {
+        margin-top: 10px;
+        border: 1px dashed #cbd5e1;
+        border-radius: 10px;
+        background: #f8fafc;
+        padding: 10px;
+      }
+
+      .prepared-state strong {
+        display: block;
+        font-size: 12px;
+        color: #334155;
+      }
+
+      .prepared-state p {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: #475569;
+      }
+
+      @media (max-width: 960px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <section class="card header">
+        <h1 class="title">Campaign: NYC June Outreach</h1>
+        <p class="subtitle">
+          Single-page flow: configure campaign, prepare recipients, open in Gmail, mark sent.
+        </p>
+      </section>
+
+      <section class="grid stats">
+        <article class="card stat">
+          <p class="label">Status</p>
+          <p class="value" id="campaign-status-value">ready</p>
+        </article>
+        <article class="card stat">
+          <p class="label">List / Recipients</p>
+          <p class="value">1 / 214</p>
+        </article>
+        <article class="card stat">
+          <p class="label">Opened / Sent</p>
+          <p class="value">18 / 12</p>
+        </article>
+        <article class="card stat">
+          <p class="label">Pacing</p>
+          <p class="value">120s-180s</p>
+        </article>
+      </section>
+
+      <section class="grid layout">
+        <article class="card panel">
+          <h2>Campaign setup</h2>
+
+          <div class="field">
+            <label>Campaign name</label>
+            <input class="input setup-control" id="campaign-name" value="NYC June Outreach" />
+          </div>
+
+          <div class="field">
+            <label>Template</label>
+            <div class="field-row">
+              <select class="select setup-control" id="template-select">
+                <option value="intro">Intro - concise (business_intro)</option>
+                <option value="review">Review request v2 (review_invite)</option>
+                <option value="followup">Follow-up short (follow_up)</option>
+              </select>
+              <button type="button" id="open-template-preview">Preview template</button>
+            </div>
+            <p class="field-help" id="template-preview-caption">
+              Preview current subject/body before preparing recipients.
+            </p>
+          </div>
+
+          <div class="field">
+            <label>Recipient list (single list only)</label>
+            <select class="select setup-control" id="recipient-list-select">
+              <option>NY Chinese Restaurants - Ready (214)</option>
+              <option>Queens Clinics - Ready (86)</option>
+            </select>
+          </div>
+
+          <div class="split">
+            <div class="field">
+              <label>Daily cap</label>
+              <input class="input setup-control" id="daily-cap" value="100" />
+            </div>
+            <div class="field">
+              <label>Hard cap</label>
+              <input class="input setup-control" id="hard-cap" value="200" />
+            </div>
+          </div>
+
+          <div class="split">
+            <div class="field">
+              <label>Min interval (sec)</label>
+              <input class="input setup-control" id="min-interval" value="120" />
+            </div>
+            <div class="field">
+              <label>Max interval (sec)</label>
+              <input class="input setup-control" id="max-interval" value="180" />
+            </div>
+          </div>
+
+          <label class="check">
+            <input type="checkbox" class="setup-control" id="include-role-mails" />
+            Include role-based mailboxes (info@, contact@, admin@)
+          </label>
+
+          <div class="actions">
+            <button id="open-notes">Prepare notes</button>
+            <a class="link-btn" href="/app/docs" target="_blank" rel="noreferrer"
+              >Open docs</a
+            >
+            <button class="primary" id="prepare-campaign">Save + Prepare recipients</button>
+            <button id="edit-setup" hidden>Edit setup</button>
+          </div>
+          <div class="prepared-state">
+            <strong>Preparation snapshot</strong>
+            <p id="prepare-snapshot">Draft mode. Setup fields are editable until you prepare.</p>
+          </div>
+        </article>
+
+        <article class="card panel">
+          <h2>Send actions (same page)</h2>
+          <div class="muted-box">
+            <strong>No queue index page.</strong>
+            One campaign can bind to one selected list snapshot. Operator stays on this page to run
+            send actions.
+          </div>
+
+          <div class="actions" style="margin-top: 12px">
+            <button class="primary" id="open-next-queued">Open next queued in Gmail</button>
+            <button id="mark-last-opened">Mark last opened as sent</button>
+            <button id="toggle-campaign-state">Pause campaign</button>
+          </div>
+
+          <div class="field" style="margin-top: 12px">
+            <label>Progress note</label>
+            <input class="input" value="Send with 120-180s interval. Avoid role mailboxes." />
+          </div>
+          <div class="sent-feedback">
+            <strong>Current opened recipient</strong>
+            <p id="current-opened-email">None opened. Click "Open next queued in Gmail" first.</p>
+            <p id="current-opened-note">Only opened recipients can be marked as sent.</p>
+          </div>
+          <div class="sent-feedback">
+            <strong>Last sent email</strong>
+            <p id="last-sent-email">No email sent in this session yet.</p>
+            <p id="last-sent-time">-</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="panel" style="padding-bottom: 0">
+          <h2 style="margin-bottom: 12px">Recipient list (single campaign view)</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Recipient</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Risk</th>
+                <th>Scheduled</th>
+                <th>Opened</th>
+                <th>Sent</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="recipient-table-body">
+              <tr data-recipient="Marcus Davis" data-email="baamplatform@gmail.com" data-status="queued">
+                <td>Marcus Davis</td>
+                <td>baamplatform@gmail.com</td>
+                <td><span class="status status-queued status-label">queued</span></td>
+                <td>low</td>
+                <td>06/04 10:20</td>
+                <td class="opened-at">-</td>
+                <td class="sent-at">-</td>
+                <td><button class="row-action" data-action="open">Open in Gmail</button></td>
+              </tr>
+              <tr
+                data-recipient="Linda Chen"
+                data-email="support@baamplatform.com"
+                data-status="opened"
+              >
+                <td>Linda Chen</td>
+                <td>support@baamplatform.com</td>
+                <td><span class="status status-opened status-label">opened</span></td>
+                <td>medium</td>
+                <td>06/04 10:22</td>
+                <td class="opened-at">06/04 10:22</td>
+                <td class="sent-at">-</td>
+                <td><button class="row-action" data-action="send">Mark sent</button></td>
+              </tr>
+              <tr data-recipient="Patrick O'Connor" data-email="patrick.o@example.com" data-status="sent">
+                <td>Patrick O'Connor</td>
+                <td>patrick.o@example.com</td>
+                <td><span class="status status-sent status-label">sent</span></td>
+                <td>low</td>
+                <td>06/04 10:24</td>
+                <td class="opened-at">06/04 10:24</td>
+                <td class="sent-at">06/04 10:26</td>
+                <td><button class="row-action" data-action="none">View log</button></td>
+              </tr>
+              <tr data-recipient="Office Team" data-email="info@clinic.com" data-status="skipped">
+                <td>Office Team</td>
+                <td>info@clinic.com</td>
+                <td><span class="status status-skipped status-label">skipped</span></td>
+                <td>high</td>
+                <td>-</td>
+                <td class="opened-at">-</td>
+                <td class="sent-at">-</td>
+                <td><button class="row-action" data-action="none">Reason</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <dialog id="notes-modal">
+      <div class="modal">
+        <header>
+          <strong>Preparation notes</strong>
+          <button id="close-notes">Close</button>
+        </header>
+        <main>
+          <div class="note">Plan starter: daily cap up to 100, hard cap up to 200.</div>
+          <div class="note">Single list only. Do not combine two lists in one campaign.</div>
+          <div class="note">Suppressed contacts are auto-skipped.</div>
+          <div class="note">
+            Role-based emails (info@, contact@, admin@) are skipped unless override is enabled.
+          </div>
+          <div class="note">Sending is manual in Gmail: open, send in Gmail, then mark as sent.</div>
+        </main>
+      </div>
+    </dialog>
+
+    <dialog id="template-preview-modal">
+      <div class="modal">
+        <header>
+          <strong id="preview-template-name">Template preview</strong>
+          <button id="close-template-preview">Close</button>
+        </header>
+        <main>
+          <div class="note">
+            <strong>Subject</strong>
+            <p class="preview-content" id="preview-template-subject"></p>
+          </div>
+          <div class="note">
+            <strong>Body</strong>
+            <p class="preview-content" id="preview-template-body"></p>
+          </div>
+        </main>
+      </div>
+    </dialog>
+
+    <script>
+      const notesModal = document.getElementById("notes-modal");
+      document.getElementById("open-notes").addEventListener("click", () => notesModal.showModal());
+      document.getElementById("close-notes").addEventListener("click", () => notesModal.close());
+
+      const templateSelect = document.getElementById("template-select");
+      const templatePreviewModal = document.getElementById("template-preview-modal");
+      const previewTemplateName = document.getElementById("preview-template-name");
+      const previewTemplateSubject = document.getElementById("preview-template-subject");
+      const previewTemplateBody = document.getElementById("preview-template-body");
+      const templatePreviewCaption = document.getElementById("template-preview-caption");
+      const templatePreviewMap = {
+        intro: {
+          name: "Intro - concise (business_intro)",
+          subject: "{first_name}, quick intro from BAAM Outreach",
+          body:
+            "Hi {first_name},\n\nI work with local businesses to improve response and review outcomes safely.\n\nIf helpful, I can share a short walkthrough for {business_name}.\n\nBest,\nBAAM Outreach Team",
+        },
+        review: {
+          name: "Review request v2 (review_invite)",
+          subject: "{first_name}, can I ask a quick favor for {business_name}?",
+          body:
+            "Hi {first_name},\n\nThanks again for supporting {business_name}.\n\nIf your experience was positive, would you mind leaving a short review here: {review_link}\n\nReally appreciate it.",
+        },
+        followup: {
+          name: "Follow-up short (follow_up)",
+          subject: "{first_name}, quick follow-up",
+          body:
+            "Hi {first_name},\n\nJust following up on my previous email about {business_name}.\n\nIf useful, I can send a 2-minute summary and next steps.\n\nThanks!",
+        },
+      };
+
+      function renderTemplatePreview() {
+        const selected = templatePreviewMap[templateSelect.value];
+        if (!selected) return;
+        previewTemplateName.textContent = selected.name;
+        previewTemplateSubject.textContent = selected.subject;
+        previewTemplateBody.textContent = selected.body;
+        templatePreviewCaption.textContent = `Selected template: ${selected.name}`;
+      }
+
+      document.getElementById("open-template-preview").addEventListener("click", () => {
+        renderTemplatePreview();
+        templatePreviewModal.showModal();
+      });
+      document
+        .getElementById("close-template-preview")
+        .addEventListener("click", () => templatePreviewModal.close());
+      templateSelect.addEventListener("change", renderTemplatePreview);
+      renderTemplatePreview();
+
+      const setupControls = Array.from(document.querySelectorAll(".setup-control"));
+      const prepareButton = document.getElementById("prepare-campaign");
+      const editSetupButton = document.getElementById("edit-setup");
+      const prepareSnapshot = document.getElementById("prepare-snapshot");
+      const campaignStatusValue = document.getElementById("campaign-status-value");
+      const toggleCampaignStateButton = document.getElementById("toggle-campaign-state");
+
+      const recipientTableBody = document.getElementById("recipient-table-body");
+      const openNextQueuedButton = document.getElementById("open-next-queued");
+      const markLastOpenedButton = document.getElementById("mark-last-opened");
+      const currentOpenedEmail = document.getElementById("current-opened-email");
+      const currentOpenedNote = document.getElementById("current-opened-note");
+      const lastSentEmail = document.getElementById("last-sent-email");
+      const lastSentTime = document.getElementById("last-sent-time");
+
+      let lastOpenedRow = null;
+      let campaignState = "ready";
+
+      function nowText() {
+        return new Date().toLocaleString();
+      }
+
+      function getRows() {
+        return Array.from(recipientTableBody.querySelectorAll("tr"));
+      }
+
+      function setCampaignState(state) {
+        campaignState = state;
+        campaignStatusValue.textContent = campaignState;
+        if (campaignState === "paused") {
+          toggleCampaignStateButton.textContent = "Resume campaign";
+          openNextQueuedButton.disabled = true;
+          markLastOpenedButton.disabled = true;
+        } else {
+          toggleCampaignStateButton.textContent = "Pause campaign";
+          openNextQueuedButton.disabled = false;
+          refreshOpenedContext();
+        }
+      }
+
+      function setSetupLocked(locked) {
+        setupControls.forEach((control) => {
+          control.disabled = locked;
+        });
+      }
+
+      function updateRowStatus(row, status) {
+        row.dataset.status = status;
+        const badge = row.querySelector(".status-label");
+        badge.textContent = status;
+        badge.className = `status status-label status-${status}`;
+
+        const actionButton = row.querySelector(".row-action");
+        if (status === "queued") {
+          actionButton.textContent = "Open in Gmail";
+          actionButton.dataset.action = "open";
+        } else if (status === "opened") {
+          actionButton.textContent = "Mark sent";
+          actionButton.dataset.action = "send";
+        } else if (status === "sent") {
+          actionButton.textContent = "View log";
+          actionButton.dataset.action = "none";
+        } else {
+          actionButton.dataset.action = "none";
+        }
+      }
+
+      function refreshOpenedContext() {
+        const openedRows = getRows().filter((row) => row.dataset.status === "opened");
+        if (openedRows.length === 0) {
+          lastOpenedRow = null;
+          currentOpenedEmail.textContent = "None opened. Click \"Open next queued in Gmail\" first.";
+          currentOpenedNote.textContent = "Only opened recipients can be marked as sent.";
+          markLastOpenedButton.disabled = true;
+          return;
+        }
+
+        if (!lastOpenedRow || lastOpenedRow.dataset.status !== "opened") {
+          lastOpenedRow = openedRows[openedRows.length - 1];
+        }
+
+        currentOpenedEmail.textContent = `${lastOpenedRow.dataset.recipient} <${lastOpenedRow.dataset.email}>`;
+        currentOpenedNote.textContent =
+          "Global send button will mark this opened recipient as sent.";
+        markLastOpenedButton.disabled = campaignState === "paused";
+      }
+
+      function markOpened(row, timestamp) {
+        updateRowStatus(row, "opened");
+        row.querySelector(".opened-at").textContent = timestamp;
+        lastOpenedRow = row;
+        refreshOpenedContext();
+      }
+
+      function markSent(row, timestamp) {
+        const currentStatus = row.dataset.status;
+        if (currentStatus !== "opened") return;
+
+        if (row.querySelector(".opened-at").textContent.trim() === "-") {
+          row.querySelector(".opened-at").textContent = timestamp;
+        }
+        row.querySelector(".sent-at").textContent = timestamp;
+        updateRowStatus(row, "sent");
+
+        const recipient = row.dataset.recipient;
+        const email = row.dataset.email;
+        lastSentEmail.textContent = `${recipient} <${email}>`;
+        lastSentTime.textContent = `Sent at ${timestamp}`;
+
+        if (lastOpenedRow === row) {
+          lastOpenedRow = null;
+        }
+        refreshOpenedContext();
+      }
+
+      prepareButton.addEventListener("click", () => {
+        setSetupLocked(true);
+        prepareSnapshot.textContent = `Prepared snapshot at ${nowText()}. Setup is locked for safe send operations.`;
+        prepareButton.textContent = "Re-prepare recipients";
+        editSetupButton.hidden = false;
+      });
+
+      editSetupButton.addEventListener("click", () => {
+        setSetupLocked(false);
+        prepareSnapshot.textContent =
+          "Editing mode enabled. Save + Prepare recipients again before continuing send actions.";
+        prepareButton.textContent = "Save + Prepare recipients";
+      });
+
+      toggleCampaignStateButton.addEventListener("click", () => {
+        setCampaignState(campaignState === "paused" ? "ready" : "paused");
+      });
+
+      openNextQueuedButton.addEventListener("click", () => {
+        if (campaignState === "paused") return;
+        const queuedRow = getRows().find((row) => row.dataset.status === "queued");
+        if (!queuedRow) return;
+        markOpened(queuedRow, nowText());
+      });
+
+      markLastOpenedButton.addEventListener("click", () => {
+        if (campaignState === "paused") return;
+        if (!lastOpenedRow || lastOpenedRow.dataset.status !== "opened") {
+          refreshOpenedContext();
+          return;
+        }
+        markSent(lastOpenedRow, nowText());
+      });
+
+      recipientTableBody.addEventListener("click", (event) => {
+        const button = event.target.closest(".row-action");
+        if (!button || campaignState === "paused") return;
+        const row = button.closest("tr");
+        const action = button.dataset.action;
+        if (!row || !action || action === "none") return;
+
+        const timestamp = nowText();
+        if (action === "open") {
+          markOpened(row, timestamp);
+        }
+        if (action === "send") {
+          markSent(row, timestamp);
+        }
+      });
+
+      setSetupLocked(false);
+      setCampaignState("ready");
+      refreshOpenedContext();
+    </script>
+  </body>
+</html>

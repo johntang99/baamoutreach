@@ -44,6 +44,13 @@ export async function POST(
     return NextResponse.json({ error: "Campaign not found." }, { status: 404 });
   }
 
+  if (campaign.status === "paused") {
+    return NextResponse.json(
+      { error: "Campaign is paused. Resume campaign before opening next recipient." },
+      { status: 409 },
+    );
+  }
+
   const { data: membership } = await supabase
     .from("workspace_memberships")
     .select("role")
@@ -62,6 +69,33 @@ export async function POST(
     return NextResponse.json(
       { error: "Viewer role cannot open queued recipients." },
       { status: 403 },
+    );
+  }
+
+  const { data: existingOpened, error: existingOpenedError } = await supabase
+    .from("campaign_recipients")
+    .select("id, email, full_name, gmail_compose_url")
+    .eq("campaign_id", campaign.id)
+    .eq("status", "opened_gmail")
+    .order("opened_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingOpenedError) {
+    return NextResponse.json({ error: existingOpenedError.message }, { status: 400 });
+  }
+
+  if (existingOpened) {
+    return NextResponse.json(
+      {
+        error:
+          "You already have an opened recipient. Mark it as sent before opening another.",
+        recipientId: existingOpened.id,
+        recipientEmail: existingOpened.email,
+        recipientName: existingOpened.full_name,
+        gmailUrl: existingOpened.gmail_compose_url,
+      },
+      { status: 409 },
     );
   }
 
@@ -188,6 +222,7 @@ export async function POST(
     done: false,
     recipientId: nextRecipient.id,
     recipientEmail: nextRecipient.email,
+    recipientName: nextRecipient.full_name,
     gmailUrl: nextRecipient.gmail_compose_url,
     queuedCount,
     openedCount,

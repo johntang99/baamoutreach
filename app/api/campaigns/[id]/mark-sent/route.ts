@@ -41,7 +41,7 @@ export async function POST(
 
   const { data: campaign, error: campaignError } = await supabase
     .from("campaigns")
-    .select("id, workspace_id")
+    .select("id, workspace_id, status")
     .eq("id", id)
     .maybeSingle();
 
@@ -77,7 +77,7 @@ export async function POST(
 
   const { data: recipient, error: recipientError } = await supabase
     .from("campaign_recipients")
-    .select("id, status, email")
+    .select("id, status, email, full_name")
     .eq("id", recipientId)
     .eq("campaign_id", campaign.id)
     .maybeSingle();
@@ -90,15 +90,33 @@ export async function POST(
     return NextResponse.json({ error: "Recipient not found." }, { status: 404 });
   }
 
+  const sentAtIso = new Date().toISOString();
+
   if (recipient.status === "sent") {
-    return NextResponse.json({ ok: true, alreadySent: true });
+    return NextResponse.json({
+      ok: true,
+      alreadySent: true,
+      recipientName: recipient.full_name,
+      recipientEmail: recipient.email,
+      sentAt: sentAtIso,
+      campaignStatus: campaign.status,
+    });
+  }
+
+  if (recipient.status !== "opened_gmail") {
+    return NextResponse.json(
+      {
+        error: `Recipient must be in opened_gmail status before marking sent. Current: ${recipient.status}.`,
+      },
+      { status: 409 },
+    );
   }
 
   const { error: updateRecipientError } = await supabase
     .from("campaign_recipients")
     .update({
       status: "sent",
-      sent_at: new Date().toISOString(),
+      sent_at: sentAtIso,
     })
     .eq("id", recipient.id);
 
@@ -133,7 +151,12 @@ export async function POST(
   const queuedCount = queuedSummary.count ?? 0;
   const openedCount = openedSummary.count ?? 0;
   const sentCount = sentSummary.count ?? 0;
-  const nextStatus = queuedCount + openedCount > 0 ? "active" : "completed";
+  const nextStatus =
+    campaign.status === "paused"
+      ? "paused"
+      : queuedCount + openedCount > 0
+        ? "active"
+        : "completed";
 
   const { error: updateCampaignError } = await supabase
     .from("campaigns")
@@ -177,5 +200,9 @@ export async function POST(
     queuedCount,
     openedCount,
     sentCount,
+    recipientName: recipient.full_name,
+    recipientEmail: recipient.email,
+    sentAt: sentAtIso,
+    campaignStatus: nextStatus,
   });
 }

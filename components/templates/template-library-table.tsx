@@ -1,0 +1,583 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+type TemplateRow = {
+  id: string;
+  name: string;
+  campaign_type: string;
+  subject_template: string;
+  body_template: string;
+  is_active: boolean;
+  created_at: string;
+};
+
+interface TemplateLibraryTableProps {
+  templates: TemplateRow[];
+  initialOpenTemplateId?: string | null;
+}
+
+export function TemplateLibraryTable({
+  templates,
+  initialOpenTemplateId = null,
+}: TemplateLibraryTableProps) {
+  const router = useRouter();
+  const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [templateRows, setTemplateRows] = useState<TemplateRow[]>(templates);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [imageAltText, setImageAltText] = useState("");
+  const [editValues, setEditValues] = useState({
+    name: "",
+    campaignType: "",
+    subjectTemplate: "",
+    bodyTemplate: "",
+  });
+
+  const selectedTemplate = useMemo(
+    () => templateRows.find((template) => template.id === selectedTemplateId) ?? null,
+    [selectedTemplateId, templateRows],
+  );
+
+  useEffect(() => {
+    if (!initialOpenTemplateId) return;
+    const matched = templateRows.find((template) => template.id === initialOpenTemplateId);
+    if (!matched) return;
+    openTemplateModal(matched);
+  }, [initialOpenTemplateId, templateRows]);
+
+  function openTemplateModal(template: TemplateRow) {
+    setSelectedTemplateId(template.id);
+    setIsEditing(false);
+    setModalError(null);
+    setModalMessage(null);
+    setImageAltText(template.name);
+    setEditValues({
+      name: template.name,
+      campaignType: template.campaign_type,
+      subjectTemplate: template.subject_template,
+      bodyTemplate: template.body_template,
+    });
+  }
+
+  function closeTemplateModal() {
+    setSelectedTemplateId(null);
+    setIsEditing(false);
+    setModalError(null);
+    setModalMessage(null);
+    setIsUploadingImage(false);
+  }
+
+  function insertIntoBody(value: string) {
+    const target = bodyTextareaRef.current;
+    if (!target) {
+      setEditValues((current) => ({
+        ...current,
+        bodyTemplate: `${current.bodyTemplate}${value}`,
+      }));
+      return;
+    }
+
+    const start = target.selectionStart ?? editValues.bodyTemplate.length;
+    const end = target.selectionEnd ?? editValues.bodyTemplate.length;
+    const next =
+      editValues.bodyTemplate.slice(0, start) + value + editValues.bodyTemplate.slice(end);
+    const nextCursor = start + value.length;
+
+    setEditValues((current) => ({
+      ...current,
+      bodyTemplate: next,
+    }));
+
+    requestAnimationFrame(() => {
+      target.focus();
+      target.setSelectionRange(nextCursor, nextCursor);
+    });
+  }
+
+  async function uploadImage(file: File) {
+    setIsUploadingImage(true);
+    setModalError(null);
+    setModalMessage(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("altText", imageAltText.trim());
+
+      const response = await fetch("/api/templates/upload-image", {
+        method: "POST",
+        body: formData,
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        markdown?: string;
+      };
+
+      if (!response.ok || !data.markdown) {
+        setModalError(data.error ?? "Could not upload image.");
+        return;
+      }
+
+      insertIntoBody(`\n${data.markdown}\n`);
+      setModalMessage("Image uploaded and inserted.");
+    } catch {
+      setModalError("Network error while uploading image.");
+    } finally {
+      setIsUploadingImage(false);
+    }
+  }
+
+  async function saveTemplateEdits() {
+    if (!selectedTemplate) return;
+
+    const name = editValues.name.trim();
+    const campaignType = editValues.campaignType.trim();
+    const subjectTemplate = editValues.subjectTemplate.trim();
+    const bodyTemplate = editValues.bodyTemplate.trim();
+
+    if (!name || !subjectTemplate || !bodyTemplate) {
+      setModalError("Name, subject, and body are required.");
+      return;
+    }
+
+    setIsSaving(true);
+    setModalError(null);
+    setModalMessage(null);
+
+    try {
+      const response = await fetch(`/api/templates/${selectedTemplate.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          campaignType: campaignType || "general",
+          subjectTemplate,
+          bodyTemplate,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        error?: string;
+        template?: TemplateRow;
+      };
+
+      if (!response.ok || !data.template) {
+        setModalError(data.error ?? "Could not update template.");
+        return;
+      }
+
+      setTemplateRows((current) =>
+        current.map((row) => (row.id === data.template?.id ? data.template : row)),
+      );
+      setModalMessage("Template updated.");
+      setIsEditing(false);
+      router.refresh();
+    } catch {
+      setModalError("Network error while saving template.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function duplicateTemplate() {
+    if (!selectedTemplate) return;
+    setIsDuplicating(true);
+    setModalError(null);
+    setModalMessage(null);
+
+    try {
+      const response = await fetch(`/api/templates/${selectedTemplate.id}/duplicate`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        template?: TemplateRow;
+      };
+
+      if (!response.ok || !data.template) {
+        setModalError(data.error ?? "Could not duplicate template.");
+        return;
+      }
+
+      setTemplateRows((current) => [data.template!, ...current]);
+      openTemplateModal(data.template);
+      setModalMessage(`Template duplicated: ${data.template.name}`);
+      router.refresh();
+    } catch {
+      setModalError("Network error while duplicating template.");
+    } finally {
+      setIsDuplicating(false);
+    }
+  }
+
+  async function setTemplateArchived(archive: boolean) {
+    if (!selectedTemplate) return;
+    setIsArchiving(true);
+    setModalError(null);
+    setModalMessage(null);
+
+    try {
+      const response = await fetch(`/api/templates/${selectedTemplate.id}/archive`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          archive,
+        }),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        template?: TemplateRow;
+      };
+
+      if (!response.ok || !data.template) {
+        setModalError(data.error ?? "Could not update template status.");
+        return;
+      }
+
+      setTemplateRows((current) =>
+        current.map((row) => (row.id === data.template?.id ? data.template : row)),
+      );
+      openTemplateModal(data.template);
+      setModalMessage(archive ? "Template archived." : "Template unarchived.");
+      router.refresh();
+    } catch {
+      setModalError("Network error while updating template status.");
+    } finally {
+      setIsArchiving(false);
+    }
+  }
+
+  if (templateRows.length === 0) {
+    return (
+      <p className="text-sm text-slate-500">
+        No templates yet. Create one to unlock single send.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div className="overflow-hidden rounded-xl border border-slate-200">
+        <table className="w-full border-collapse text-xs">
+          <thead className="bg-slate-50">
+            <tr>
+              {["Name", "Type", "Subject", "Active", "Created"].map((header) => (
+                <th
+                  key={header}
+                  className="border-b border-slate-200 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500"
+                >
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {templateRows.map((template) => (
+              <tr key={template.id}>
+                <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => openTemplateModal(template)}
+                    className="font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    {template.name}
+                  </button>
+                </td>
+                <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
+                  {template.campaign_type}
+                </td>
+                <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
+                  {template.subject_template}
+                </td>
+                <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
+                  {template.is_active ? "Yes" : "No"}
+                </td>
+                <td className="border-b border-slate-200 px-3 py-2 text-slate-500">
+                  {new Date(template.created_at).toLocaleDateString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedTemplate ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
+          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">
+                {selectedTemplate.name} ({selectedTemplate.campaign_type})
+              </h3>
+              <div className="flex items-center gap-2">
+                {!isEditing ? (
+                  <button
+                    type="button"
+                    onClick={duplicateTemplate}
+                    disabled={isDuplicating}
+                    className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isDuplicating ? "Duplicating..." : "Duplicate"}
+                  </button>
+                ) : null}
+                {isEditing ? (
+                  <button
+                    type="button"
+                    onClick={saveTemplateEdits}
+                    disabled={isSaving}
+                    className="inline-flex h-8 items-center rounded-md border border-blue-700 bg-blue-600 px-2.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSaving ? "Saving..." : "Save"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(true);
+                      setModalError(null);
+                      setModalMessage(null);
+                    }}
+                    className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Edit
+                  </button>
+                )}
+                {isEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setModalError(null);
+                      setModalMessage(null);
+                      setEditValues({
+                        name: selectedTemplate.name,
+                        campaignType: selectedTemplate.campaign_type,
+                        subjectTemplate: selectedTemplate.subject_template,
+                        bodyTemplate: selectedTemplate.body_template,
+                      });
+                    }}
+                    className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isArchiving}
+                    onClick={() => setTemplateArchived(selectedTemplate.is_active)}
+                    className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isArchiving
+                      ? "Saving..."
+                      : selectedTemplate.is_active
+                        ? "Archive"
+                        : "Unarchive"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={closeTemplateModal}
+                  className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            {modalError ? (
+              <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {modalError}
+              </p>
+            ) : null}
+            {modalMessage ? (
+              <p className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                {modalMessage}
+              </p>
+            ) : null}
+
+            {isEditing ? (
+              <div className="grid gap-2 text-sm text-slate-700">
+                <label className="grid gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Name
+                  </span>
+                  <input
+                    type="text"
+                    value={editValues.name}
+                    onChange={(event) =>
+                      setEditValues((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Campaign type
+                  </span>
+                  <input
+                    type="text"
+                    value={editValues.campaignType}
+                    onChange={(event) =>
+                      setEditValues((current) => ({
+                        ...current,
+                        campaignType: event.target.value,
+                      }))
+                    }
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Subject
+                  </span>
+                  <input
+                    type="text"
+                    value={editValues.subjectTemplate}
+                    onChange={(event) =>
+                      setEditValues((current) => ({
+                        ...current,
+                        subjectTemplate: event.target.value,
+                      }))
+                    }
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="grid gap-1">
+                  <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Body
+                  </span>
+                  <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2">
+                    <button
+                      type="button"
+                      onClick={() => insertIntoBody("{first_name}")}
+                      className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700"
+                    >
+                      Insert first name
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertIntoBody("{business_name}")}
+                      className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700"
+                    >
+                      Insert business
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        insertIntoBody("\n[Link text](https://example.com)\n")
+                      }
+                      className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700"
+                    >
+                      Insert link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        insertIntoBody("\n![Image alt](https://example.com/image.png)\n")
+                      }
+                      className="inline-flex h-7 items-center rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700"
+                    >
+                      Insert image
+                    </button>
+                  </div>
+                  <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 sm:grid-cols-[1fr_auto]">
+                    <input
+                      type="text"
+                      value={imageAltText}
+                      onChange={(event) => setImageAltText(event.target.value)}
+                      placeholder="Image alt text"
+                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+                    />
+                    <label className="inline-flex h-8 cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                      {isUploadingImage ? "Uploading..." : "Upload image"}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        disabled={isUploadingImage}
+                        className="hidden"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            void uploadImage(file);
+                          }
+                          event.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className="grid gap-2 lg:grid-cols-2">
+                    <textarea
+                      ref={bodyTextareaRef}
+                      rows={12}
+                      value={editValues.bodyTemplate}
+                      onChange={(event) =>
+                        setEditValues((current) => ({
+                          ...current,
+                          bodyTemplate: event.target.value,
+                        }))
+                      }
+                      className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                    <div className="rounded-lg border border-slate-300 bg-white px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                        Markdown preview
+                      </p>
+                      <div className="prose prose-sm mt-2 max-w-none text-slate-700">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {editValues.bodyTemplate}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-2 text-sm text-slate-700">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Status
+                  </p>
+                  <p className="mt-1">{selectedTemplate.is_active ? "Active" : "Archived"}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Subject
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap">
+                    {selectedTemplate.subject_template}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    Body
+                  </p>
+                  <div className="prose prose-sm mt-1 max-w-none text-slate-700">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {selectedTemplate.body_template}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
