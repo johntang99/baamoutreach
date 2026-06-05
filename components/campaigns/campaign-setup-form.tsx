@@ -2,6 +2,9 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 
 type TemplateOption = {
   id: string;
@@ -30,6 +33,56 @@ interface CampaignSetupFormProps {
   maxDailyCap: number;
   maxHardCap: number;
   createCampaignAction: (formData: FormData) => void | Promise<void>;
+}
+
+function decodeTemplateText(value: string) {
+  return value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t");
+}
+
+function toPreviewMarkdown(value: string) {
+  const decoded = decodeTemplateText(value);
+  const bulletNormalized = decoded
+    .replace(/\s*[•●▪◦]\s*/g, "\n- ");
+
+  if (!bulletNormalized.includes("\n")) {
+    return bulletNormalized;
+  }
+
+  if (bulletNormalized.includes("\n\n")) {
+    return bulletNormalized;
+  }
+
+  const lines = bulletNormalized.split("\n").map((line) => line.trimEnd());
+  const output: string[] = [];
+  let previousWasList = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      if (output.at(-1) !== "") {
+        output.push("");
+      }
+      previousWasList = false;
+      continue;
+    }
+
+    const isBullet = /^([*-]\s+|\d+\.\s+)/.test(line);
+    if (output.length > 0 && output.at(-1) !== "") {
+      if (isBullet && !previousWasList) {
+        output.push("");
+      } else if (!isBullet) {
+        output.push("");
+      }
+    }
+
+    output.push(line);
+    previousWasList = isBullet;
+  }
+
+  return output.join("\n");
 }
 
 export function CampaignSetupForm({
@@ -219,8 +272,8 @@ export function CampaignSetupForm({
       </form>
 
       {notesOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/30 px-4 py-6">
+          <div className="mx-auto w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-900">Preparation notes</h3>
               <button
@@ -251,8 +304,8 @@ export function CampaignSetupForm({
       ) : null}
 
       {templatePreviewOpen && selectedTemplate ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/30 px-4 py-6">
+          <div className="mx-auto flex w-full max-w-2xl max-h-[calc(100vh-3rem)] flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-900">
                 {selectedTemplate.name} ({selectedTemplate.campaign_type})
@@ -265,18 +318,24 @@ export function CampaignSetupForm({
                 Close
               </button>
             </div>
-            <div className="space-y-2 text-sm text-slate-700">
+            <div className="space-y-2 overflow-y-auto pr-1 text-sm text-slate-700">
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                   Subject
                 </p>
-                <p className="mt-1 whitespace-pre-wrap">{selectedTemplate.subject_template}</p>
+                <p className="mt-1 whitespace-pre-wrap">
+                  {decodeTemplateText(selectedTemplate.subject_template)}
+                </p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                   Body
                 </p>
-                <p className="mt-1 whitespace-pre-wrap">{selectedTemplate.body_template}</p>
+                <div className="prose prose-sm mt-1 max-w-none text-slate-700">
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                    {toPreviewMarkdown(selectedTemplate.body_template)}
+                  </ReactMarkdown>
+                </div>
               </div>
             </div>
           </div>

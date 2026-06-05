@@ -32,6 +32,15 @@ function purposeLabel(purpose: string) {
   return purpose.replace(/_/g, " ");
 }
 
+function displayTemplateBody(value: string) {
+  // Some seeded rows can contain escaped newline sequences ("\n") as literal text.
+  // Decode for preview rendering only; do not mutate persisted data.
+  return value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t");
+}
+
 export function TemplateStarterGrid() {
   const [items, setItems] = useState<TemplateSample[]>([]);
   const [loading, setLoading] = useState(true);
@@ -260,7 +269,7 @@ export function TemplateStarterGrid() {
                     Body preview
                   </p>
                   <p className="mt-1 whitespace-pre-wrap text-xs text-slate-700">
-                    {sample.body_template}
+                    {displayTemplateBody(sample.body_template)}
                   </p>
                 </div>
               ) : null}

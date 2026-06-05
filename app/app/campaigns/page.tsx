@@ -30,6 +30,7 @@ export default async function CampaignsPage({
   const preselectedListId = typeof params.listId === "string" ? params.listId : "";
   const activeCampaignIdParam =
     typeof params.campaignId === "string" ? params.campaignId : "";
+  const isNewCampaignMode = params.new === "1";
 
   const supabase = await createClient();
   const {
@@ -537,10 +538,12 @@ export default async function CampaignsPage({
   const policyDefaults = await getWorkspacePolicyDefaults(workspace.workspaceId);
   const subscription = await getWorkspaceSubscription(workspace.workspaceId, supabase);
 
+  const activeCampaignFromParam = safeCampaigns.find(
+    (campaign) => campaign.id === activeCampaignIdParam,
+  );
   const activeCampaign =
-    safeCampaigns.find((campaign) => campaign.id === activeCampaignIdParam) ??
-    safeCampaigns[0] ??
-    null;
+    activeCampaignFromParam ??
+    (activeCampaignIdParam ? null : isNewCampaignMode ? null : safeCampaigns[0] ?? null);
 
   const { data: campaignRecipients, error: campaignRecipientsError } = activeCampaign
     ? await supabase
@@ -590,12 +593,20 @@ export default async function CampaignsPage({
         title="Campaigns"
         description="Single-page campaign workflow: prepare from one list, send in Gmail, and mark sent without switching screens."
         actions={
-          <Link
-            href="/app/docs"
-            className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            View setup guide
-          </Link>
+          <>
+            <Link
+              href="/app/campaigns?new=1"
+              className="inline-flex h-9 items-center rounded-lg border border-blue-700 bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700"
+            >
+              + Start new campaign
+            </Link>
+            <Link
+              href="/app/docs"
+              className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              View setup guide
+            </Link>
+          </>
         }
       />
 
@@ -607,6 +618,15 @@ export default async function CampaignsPage({
       {message ? (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           {message}
+        </p>
+      ) : null}
+      {isNewCampaignMode ? (
+        <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+          New campaign mode is on. Use
+          <span className="mx-1 font-semibold text-blue-900">
+            Campaign setup
+          </span>
+          below to create a fresh campaign session.
         </p>
       ) : null}
       {listsMissing ? (
@@ -633,25 +653,38 @@ export default async function CampaignsPage({
         <>
           {safeCampaigns.length > 0 ? (
             <SectionCard title="Active campaign session">
-              <form method="get" className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                <select
-                  name="campaignId"
-                  defaultValue={activeCampaign?.id}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  {safeCampaigns.map((campaign) => (
-                    <option key={campaign.id} value={campaign.id}>
-                      {campaign.name} ({campaign.status})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  Load campaign
-                </button>
-              </form>
+              <div className="grid gap-2">
+                <form method="get" className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <select
+                    name="campaignId"
+                    defaultValue={activeCampaign?.id}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    {safeCampaigns.map((campaign) => (
+                      <option key={campaign.id} value={campaign.id}>
+                        {campaign.name} ({campaign.status})
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Load campaign
+                  </button>
+                </form>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                  <p className="text-xs text-blue-700">
+                    Want to avoid editing old unfinished campaigns?
+                    <Link
+                      href="/app/campaigns?new=1"
+                      className="ml-1 font-semibold text-blue-900 underline"
+                    >
+                      Start a new campaign
+                    </Link>
+                  </p>
+                </div>
+              </div>
             </SectionCard>
           ) : null}
 

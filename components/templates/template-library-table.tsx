@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 
 type TemplateRow = {
   id: string;
@@ -20,6 +21,59 @@ interface TemplateLibraryTableProps {
   initialOpenTemplateId?: string | null;
 }
 
+function decodeTemplateText(value: string) {
+  return value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t");
+}
+
+function toPreviewMarkdown(value: string) {
+  const decoded = decodeTemplateText(value);
+  const bulletNormalized = decoded
+    // Normalize common bullet glyphs to markdown list items on new lines.
+    .replace(/\s*[•●▪◦]\s*/g, "\n- ");
+  if (!bulletNormalized.includes("\n")) {
+    return bulletNormalized;
+  }
+
+  // Keep author-intended markdown as-is if they already use explicit paragraph breaks.
+  if (bulletNormalized.includes("\n\n")) {
+    return bulletNormalized;
+  }
+
+  const lines = bulletNormalized.split("\n").map((line) => line.trimEnd());
+  const output: string[] = [];
+  let previousWasList = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      if (output.at(-1) !== "") {
+        output.push("");
+      }
+      previousWasList = false;
+      continue;
+    }
+
+    const isBullet = /^([•*-]\s+|\d+\.\s+)/.test(line);
+    const normalizedLine = line.replace(/^•\s+/, "- ");
+
+    if (output.length > 0 && output.at(-1) !== "") {
+      if (isBullet && !previousWasList) {
+        output.push("");
+      } else if (!isBullet) {
+        output.push("");
+      }
+    }
+
+    output.push(normalizedLine);
+    previousWasList = isBullet;
+  }
+
+  return output.join("\n");
+}
+
 export function TemplateLibraryTable({
   templates,
   initialOpenTemplateId = null,
@@ -32,9 +86,11 @@ export function TemplateLibraryTable({
   const [isSaving, setIsSaving] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
   const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [tableNotice, setTableNotice] = useState<string | null>(null);
   const [imageAltText, setImageAltText] = useState("");
   const [editValues, setEditValues] = useState({
     name: "",
@@ -64,8 +120,8 @@ export function TemplateLibraryTable({
     setEditValues({
       name: template.name,
       campaignType: template.campaign_type,
-      subjectTemplate: template.subject_template,
-      bodyTemplate: template.body_template,
+      subjectTemplate: decodeTemplateText(template.subject_template),
+      bodyTemplate: decodeTemplateText(template.body_template),
     });
   }
 
@@ -261,6 +317,43 @@ export function TemplateLibraryTable({
     }
   }
 
+  async function deleteTemplate() {
+    if (!selectedTemplate) return;
+    const confirmed = window.confirm(
+      `Delete template "${selectedTemplate.name}"? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    setModalError(null);
+    setModalMessage(null);
+    setTableNotice(null);
+
+    try {
+      const response = await fetch(`/api/templates/${selectedTemplate.id}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setModalError(data.error ?? "Could not delete template.");
+        return;
+      }
+
+      const deletedName = selectedTemplate.name;
+      setTemplateRows((current) =>
+        current.filter((row) => row.id !== selectedTemplate.id),
+      );
+      setSelectedTemplateId(null);
+      setIsEditing(false);
+      setTableNotice(`Template deleted: ${deletedName}`);
+      router.refresh();
+    } catch {
+      setModalError("Network error while deleting template.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   if (templateRows.length === 0) {
     return (
       <p className="text-sm text-slate-500">
@@ -271,6 +364,11 @@ export function TemplateLibraryTable({
 
   return (
     <>
+      {tableNotice ? (
+        <p className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          {tableNotice}
+        </p>
+      ) : null}
       <div className="overflow-hidden rounded-xl border border-slate-200">
         <table className="w-full border-collapse text-xs">
           <thead className="bg-slate-50">
@@ -327,7 +425,7 @@ export function TemplateLibraryTable({
                   <button
                     type="button"
                     onClick={duplicateTemplate}
-                    disabled={isDuplicating}
+                    disabled={isDuplicating || isDeleting}
                     className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isDuplicating ? "Duplicating..." : "Duplicate"}
@@ -337,7 +435,7 @@ export function TemplateLibraryTable({
                   <button
                     type="button"
                     onClick={saveTemplateEdits}
-                    disabled={isSaving}
+                    disabled={isSaving || isDeleting}
                     className="inline-flex h-8 items-center rounded-md border border-blue-700 bg-blue-600 px-2.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isSaving ? "Saving..." : "Save"}
@@ -345,12 +443,13 @@ export function TemplateLibraryTable({
                 ) : (
                   <button
                     type="button"
+                    disabled={isDeleting}
                     onClick={() => {
                       setIsEditing(true);
                       setModalError(null);
                       setModalMessage(null);
                     }}
-                    className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Edit
                   </button>
@@ -365,8 +464,8 @@ export function TemplateLibraryTable({
                       setEditValues({
                         name: selectedTemplate.name,
                         campaignType: selectedTemplate.campaign_type,
-                        subjectTemplate: selectedTemplate.subject_template,
-                        bodyTemplate: selectedTemplate.body_template,
+                        subjectTemplate: decodeTemplateText(selectedTemplate.subject_template),
+                        bodyTemplate: decodeTemplateText(selectedTemplate.body_template),
                       });
                     }}
                     className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
@@ -376,7 +475,7 @@ export function TemplateLibraryTable({
                 ) : (
                   <button
                     type="button"
-                    disabled={isArchiving}
+                    disabled={isArchiving || isDeleting}
                     onClick={() => setTemplateArchived(selectedTemplate.is_active)}
                     className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
@@ -387,6 +486,16 @@ export function TemplateLibraryTable({
                         : "Unarchive"}
                   </button>
                 )}
+                {!isEditing ? (
+                  <button
+                    type="button"
+                    onClick={deleteTemplate}
+                    disabled={isDeleting || isArchiving || isDuplicating}
+                    className="inline-flex h-8 items-center rounded-md border border-rose-300 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isDeleting ? "Deleting..." : "Delete"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={closeTemplateModal}
@@ -539,8 +648,8 @@ export function TemplateLibraryTable({
                         Markdown preview
                       </p>
                       <div className="prose prose-sm mt-2 max-w-none text-slate-700">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {editValues.bodyTemplate}
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                          {toPreviewMarkdown(editValues.bodyTemplate)}
                         </ReactMarkdown>
                       </div>
                     </div>
@@ -560,7 +669,7 @@ export function TemplateLibraryTable({
                     Subject
                   </p>
                   <p className="mt-1 whitespace-pre-wrap">
-                    {selectedTemplate.subject_template}
+                    {decodeTemplateText(selectedTemplate.subject_template)}
                   </p>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -568,8 +677,8 @@ export function TemplateLibraryTable({
                     Body
                   </p>
                   <div className="prose prose-sm mt-1 max-w-none text-slate-700">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {selectedTemplate.body_template}
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                      {toPreviewMarkdown(selectedTemplate.body_template)}
                     </ReactMarkdown>
                   </div>
                 </div>
