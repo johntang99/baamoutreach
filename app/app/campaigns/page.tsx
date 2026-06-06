@@ -12,6 +12,7 @@ import {
   normalizeIntervalRange,
   scheduledAtForIndex,
 } from "@/lib/campaigns";
+import { parseTemplateVariantRows } from "@/lib/template-variant-sets";
 import { getWorkspacePolicyDefaults } from "@/lib/policies";
 import { isMissingTableError, toSafeText } from "@/lib/single-send";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +32,8 @@ export default async function CampaignsPage({
   const activeCampaignIdParam =
     typeof params.campaignId === "string" ? params.campaignId : "";
   const isNewCampaignMode = params.new === "1";
+  const preselectedIncludeRoleParam =
+    typeof params.includeRole === "string" ? params.includeRole : "";
 
   const supabase = await createClient();
   const {
@@ -48,6 +51,7 @@ export default async function CampaignsPage({
 
     const name = toSafeText(formData.get("name"));
     const templateId = toSafeText(formData.get("template_id"));
+    const templateVariantSetId = toSafeText(formData.get("template_variant_set_id"));
     const sourceListId = toSafeText(formData.get("source_list_id"));
     const includeRoleEmails = String(formData.get("include_role_emails")) === "on";
     const dailyCapInput = Number(formData.get("daily_cap") ?? NaN);
@@ -159,7 +163,7 @@ export default async function CampaignsPage({
 
     const { data: selectedList, error: selectedListError } = await serverSupabase
       .from("audience_lists")
-      .select("id, name, default_language, variants_template_id, template_variants")
+      .select("id, name, default_language")
       .eq("id", sourceListId)
       .eq("workspace_id", actionWorkspace.workspaceId)
       .eq("status", "ready")
@@ -188,15 +192,56 @@ export default async function CampaignsPage({
       id: selectedList.id,
       name: selectedList.name,
       defaultLanguage: selectedList.default_language,
-      variantsTemplateId: selectedList.variants_template_id,
-      templateVariants: Array.isArray(selectedList.template_variants)
-        ? (selectedList.template_variants as Array<{
+    };
+
+    let selectedVariantSet:
+      | {
+          id: string;
+          name: string;
+          language: string;
+          variants: Array<{
             subject: string;
             body: string;
             tone: string;
-          }>)
-        : [],
-    };
+            edited_at?: string | null;
+          }>;
+        }
+      | null = null;
+
+    if (templateVariantSetId) {
+      const { data: variantSet, error: variantSetError } = await serverSupabase
+        .from("template_variant_sets")
+        .select("id, name, language, variants, template_id")
+        .eq("workspace_id", actionWorkspace.workspaceId)
+        .eq("id", templateVariantSetId)
+        .maybeSingle();
+
+      if (variantSetError || !variantSet) {
+        redirect(
+          "/app/campaigns?error=" +
+            encodeURIComponent(variantSetError?.message ?? "Variant set not found."),
+        );
+      }
+      if (variantSet.template_id !== template.id) {
+        redirect(
+          "/app/campaigns?error=" +
+            encodeURIComponent("Selected variant set does not belong to the selected template."),
+        );
+      }
+
+      selectedVariantSet = {
+        id: variantSet.id,
+        name: variantSet.name,
+        language: variantSet.language,
+        variants: parseTemplateVariantRows(variantSet.variants),
+      };
+      if (selectedVariantSet.variants.length === 0) {
+        redirect(
+          "/app/campaigns?error=" +
+            encodeURIComponent("Selected variant set has no valid variants."),
+        );
+      }
+    }
 
     const { data: listEntries, error: listEntriesError } = await serverSupabase
       .from("audience_list_entries")
@@ -247,6 +292,7 @@ export default async function CampaignsPage({
         name,
         source_list_id: sourceList.id,
         template_id: template.id,
+        template_variant_set_id: selectedVariantSet?.id ?? null,
         status: "draft",
         daily_cap: dailyCap,
         hard_cap: hardCap,
@@ -273,25 +319,18 @@ export default async function CampaignsPage({
     let variantAppliedCount = 0;
 
     const variantAssignment = new Map<number, number>();
-    const activeVariants =
-      sourceList.variantsTemplateId === template.id && sourceList.templateVariants.length > 0
-        ? sourceList.templateVariants
-        : [];
+    const activeVariants = selectedVariantSet?.variants ?? [];
+    const variantLanguage = selectedVariantSet?.language ?? sourceList.defaultLanguage;
 
     if (activeVariants.length > 0) {
       const eligibleIndices: number[] = [];
       sourceRecipients.forEach((recipient, index) => {
-        if (recipient.language === sourceList.defaultLanguage) {
+        if (recipient.language === variantLanguage) {
           eligibleIndices.push(index);
         }
       });
-      const ordered = eligibleIndices.map((_, index) => index % activeVariants.length);
-      for (let index = ordered.length - 1; index > 0; index -= 1) {
-        const swap = Math.floor(Math.random() * (index + 1));
-        [ordered[index], ordered[swap]] = [ordered[swap], ordered[index]];
-      }
       eligibleIndices.forEach((recipientIndex, slot) => {
-        variantAssignment.set(recipientIndex, ordered[slot]);
+        variantAssignment.set(recipientIndex, slot % activeVariants.length);
       });
     }
 
@@ -441,6 +480,7 @@ export default async function CampaignsPage({
         include_role_emails: includeRoleEmails,
         source_list_id: sourceList.id,
         variant_applied_count: variantAppliedCount,
+        template_variant_set_id: selectedVariantSet?.id ?? null,
       },
       created_by: actionUser.id,
     });
@@ -463,7 +503,8 @@ export default async function CampaignsPage({
         sourceListId: sourceList.id,
         sourceListName: sourceList.name,
         variantAppliedCount,
-        variantsSourceTemplateMatched: sourceList.variantsTemplateId === template.id,
+        templateVariantSetId: selectedVariantSet?.id ?? null,
+        templateVariantSetName: selectedVariantSet?.name ?? null,
       },
     });
 
@@ -471,7 +512,8 @@ export default async function CampaignsPage({
       `/app/campaigns?campaignId=${campaign.id}&message=` +
         encodeURIComponent(
           `Campaign prepared with ${queuedCount} queued and ${skippedCount} skipped recipients.`,
-        ),
+        ) +
+        `&includeRole=${includeRoleEmails ? "1" : "0"}`,
     );
   }
 
@@ -482,6 +524,7 @@ export default async function CampaignsPage({
         id,
         name,
         source_list_id,
+        template_variant_set_id,
         source_list:audience_lists (
           id,
           name
@@ -501,6 +544,13 @@ export default async function CampaignsPage({
           id,
           name,
           campaign_type
+        ),
+        template_variant_set:template_variant_sets (
+          id,
+          name,
+          language,
+          variants,
+          updated_at
         )
       `,
     )
@@ -516,25 +566,45 @@ export default async function CampaignsPage({
     .order("created_at", { ascending: false })
     .limit(100);
 
+  const { data: templateVariantSets, error: templateVariantSetsError } = await supabase
+    .from("template_variant_sets")
+    .select("id, template_id, name, language, variants, updated_at, generation_notes")
+    .eq("workspace_id", workspace.workspaceId)
+    .order("created_at", { ascending: true });
+
   const { data: readyLists, error: readyListsError } = await supabase
     .from("audience_lists")
-    .select("id, name, ready_row_count, template_variants")
+    .select("id, name, ready_row_count")
     .eq("workspace_id", workspace.workspaceId)
     .eq("status", "ready")
     .order("created_at", { ascending: false })
     .limit(100);
 
   const schemaMissing =
-    isMissingTableError(campaignsError) || isMissingTableError(templatesError);
+    isMissingTableError(campaignsError) ||
+    isMissingTableError(templatesError) ||
+    isMissingTableError(templateVariantSetsError);
   const listsMissing = isMissingTableError(readyListsError);
 
   if (readyListsError && !listsMissing) {
     throw readyListsError;
   }
+  if (templateVariantSetsError && !isMissingTableError(templateVariantSetsError)) {
+    throw templateVariantSetsError;
+  }
 
   const safeCampaigns = campaigns ?? [];
   const safeTemplates = templates ?? [];
   const safeLists = readyLists ?? [];
+  const safeTemplateVariantSets = (templateVariantSets ?? []).map((row) => ({
+    id: row.id,
+    template_id: row.template_id,
+    name: row.name,
+    language: row.language as "en" | "zh" | "es",
+    generation_notes: (row.generation_notes as Record<string, unknown>) ?? {},
+    variants: parseTemplateVariantRows(row.variants),
+    updated_at: row.updated_at,
+  }));
   const policyDefaults = await getWorkspacePolicyDefaults(workspace.workspaceId);
   const subscription = await getWorkspaceSubscription(workspace.workspaceId, supabase);
 
@@ -549,7 +619,7 @@ export default async function CampaignsPage({
     ? await supabase
         .from("campaign_recipients")
         .select(
-          "id, full_name, email, status, risk_level, risk_notes, variant_index, scheduled_at, opened_at, sent_at, gmail_compose_url",
+          "id, full_name, company_name, email, status, risk_level, risk_notes, variant_index, scheduled_at, opened_at, sent_at, gmail_compose_url",
         )
         .eq("campaign_id", activeCampaign.id)
         .order("created_at", { ascending: true })
@@ -586,6 +656,33 @@ export default async function CampaignsPage({
       ? activeCampaign.template[0]
       : activeCampaign.template
     : null;
+  const templateVariantSetInfo = activeCampaign
+    ? Array.isArray(activeCampaign.template_variant_set)
+      ? activeCampaign.template_variant_set[0]
+      : activeCampaign.template_variant_set
+    : null;
+  const effectivePreselectedListId = preselectedListId || activeCampaign?.source_list_id || "";
+  const effectivePreselectedTemplateId = templateInfo?.id ?? "";
+  const effectivePreselectedVariantSetId = templateVariantSetInfo?.id ?? "";
+  const effectiveCampaignName = activeCampaign?.name ?? "";
+  const effectiveDailyCap = activeCampaign?.daily_cap ?? Math.min(
+    policyDefaults.recommendedDailyCap,
+    subscription.campaignDailyLimit,
+  );
+  const effectiveHardCap = activeCampaign?.hard_cap ?? Math.min(
+    policyDefaults.hardDailyCap,
+    subscription.hardCapLimit,
+  );
+  const effectiveMinIntervalSeconds =
+    activeCampaign?.min_interval_seconds ?? policyDefaults.minIntervalSeconds;
+  const effectiveMaxIntervalSeconds =
+    activeCampaign?.max_interval_seconds ?? policyDefaults.maxIntervalSeconds;
+  const effectiveAllowRoleBasedRecipients =
+    preselectedIncludeRoleParam === "1"
+      ? true
+      : preselectedIncludeRoleParam === "0"
+        ? false
+        : policyDefaults.allowRoleBasedRecipients;
 
   return (
     <div className="grid gap-3">
@@ -646,6 +743,10 @@ export default async function CampaignsPage({
             <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
               supabase/migrations/0003_bulk_campaign_mvp.sql
             </code>
+            and
+            <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+              supabase/migrations/0011_template_variant_sets.sql
+            </code>
             and refresh this page.
           </p>
         </SectionCard>
@@ -691,20 +792,19 @@ export default async function CampaignsPage({
           <section className="grid gap-3 xl:grid-cols-[1fr_1.3fr]">
             <SectionCard title="Campaign setup">
               <CampaignSetupForm
+                key={`campaign-setup-${activeCampaign?.id ?? "new"}-${effectivePreselectedTemplateId}-${effectivePreselectedListId}-${effectivePreselectedVariantSetId}`}
                 templates={safeTemplates}
                 readyLists={safeLists}
-                preselectedListId={preselectedListId}
-                defaultDailyCap={Math.min(
-                  policyDefaults.recommendedDailyCap,
-                  subscription.campaignDailyLimit,
-                )}
-                defaultHardCap={Math.min(
-                  policyDefaults.hardDailyCap,
-                  subscription.hardCapLimit,
-                )}
-                defaultMinIntervalSeconds={policyDefaults.minIntervalSeconds}
-                defaultMaxIntervalSeconds={policyDefaults.maxIntervalSeconds}
-                defaultAllowRoleBasedRecipients={policyDefaults.allowRoleBasedRecipients}
+                templateVariantSets={safeTemplateVariantSets}
+                preselectedListId={effectivePreselectedListId}
+                preselectedTemplateId={effectivePreselectedTemplateId}
+                preselectedVariantSetId={effectivePreselectedVariantSetId}
+                initialCampaignName={effectiveCampaignName}
+                initialDailyCap={effectiveDailyCap}
+                initialHardCap={effectiveHardCap}
+                initialMinIntervalSeconds={effectiveMinIntervalSeconds}
+                initialMaxIntervalSeconds={effectiveMaxIntervalSeconds}
+                initialAllowRoleBasedRecipients={effectiveAllowRoleBasedRecipients}
                 maxDailyCap={subscription.campaignDailyLimit}
                 maxHardCap={subscription.hardCapLimit}
                 createCampaignAction={createCampaign}
@@ -766,6 +866,9 @@ export default async function CampaignsPage({
                   </p>
                   <p className="text-[11px] text-slate-500">
                     Template: {templateInfo?.name ?? "-"}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Variant set: {templateVariantSetInfo?.name ?? "None"}
                   </p>
                   <p className="text-[11px] text-slate-500">
                     Source: {sourceListInfo?.name ?? "-"}

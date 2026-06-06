@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 type CampaignRecipientRow = {
   id: string;
   full_name: string | null;
+  company_name: string | null;
   email: string;
   status: string;
   risk_level: string;
@@ -109,6 +110,7 @@ export function CampaignRecipientTable({
             <tr>
               {[
                 "Recipient",
+                "Company",
                 "Email",
                 "Status",
                 "Risk",
@@ -131,6 +133,9 @@ export function CampaignRecipientTable({
               <tr key={recipient.id}>
                 <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
                   {recipient.full_name}
+                </td>
+                <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
+                  {recipient.company_name || "-"}
                 </td>
                 <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
                   {recipient.email}

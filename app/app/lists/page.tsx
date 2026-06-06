@@ -430,7 +430,7 @@ export default async function ListsPage({
               </li>
               <li>
                 Open <strong>View detail</strong> to review parsing stats and optional
-                AI content variants.
+                contact quality stats before campaign handoff.
               </li>
               <li>
                 Click <strong>Create campaign from this list</strong> and choose a

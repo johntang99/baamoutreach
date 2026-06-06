@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import {
+  TemplateVariantSetsPanel,
+  type TemplateVariantSetRow,
+} from "@/components/templates/template-variant-sets-panel";
 
 type TemplateRow = {
   id: string;
@@ -18,6 +22,7 @@ type TemplateRow = {
 
 interface TemplateLibraryTableProps {
   templates: TemplateRow[];
+  variantSetsByTemplate: Record<string, TemplateVariantSetRow[]>;
   initialOpenTemplateId?: string | null;
 }
 
@@ -76,6 +81,7 @@ function toPreviewMarkdown(value: string) {
 
 export function TemplateLibraryTable({
   templates,
+  variantSetsByTemplate,
   initialOpenTemplateId = null,
 }: TemplateLibraryTableProps) {
   const router = useRouter();
@@ -91,6 +97,9 @@ export function TemplateLibraryTable({
   const [modalError, setModalError] = useState<string | null>(null);
   const [modalMessage, setModalMessage] = useState<string | null>(null);
   const [tableNotice, setTableNotice] = useState<string | null>(null);
+  const [variantSetMap, setVariantSetMap] = useState<Record<string, TemplateVariantSetRow[]>>(
+    variantSetsByTemplate,
+  );
   const [imageAltText, setImageAltText] = useState("");
   const [editValues, setEditValues] = useState({
     name: "",
@@ -103,6 +112,9 @@ export function TemplateLibraryTable({
     () => templateRows.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templateRows],
   );
+  const selectedTemplateVariantSets = selectedTemplate
+    ? (variantSetMap[selectedTemplate.id] ?? [])
+    : [];
 
   useEffect(() => {
     if (!initialOpenTemplateId) return;
@@ -655,6 +667,26 @@ export function TemplateLibraryTable({
                     </div>
                   </div>
                 </label>
+                {selectedTemplate ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                      Template variant sets
+                    </p>
+                    <TemplateVariantSetsPanel
+                      key={`template-variant-sets-edit-${selectedTemplate.id}`}
+                      templateId={selectedTemplate.id}
+                      initialSets={selectedTemplateVariantSets}
+                      canEdit={true}
+                      allowGenerate={true}
+                      onSetsChange={(nextSets) =>
+                        setVariantSetMap((current) => ({
+                          ...current,
+                          [selectedTemplate.id]: nextSets,
+                        }))
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="space-y-2 text-sm text-slate-700">
@@ -682,6 +714,26 @@ export function TemplateLibraryTable({
                     </ReactMarkdown>
                   </div>
                 </div>
+                {selectedTemplate ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                      Template variant sets
+                    </p>
+                    <TemplateVariantSetsPanel
+                      key={`template-variant-sets-view-${selectedTemplate.id}`}
+                      templateId={selectedTemplate.id}
+                      initialSets={selectedTemplateVariantSets}
+                      canEdit={true}
+                      allowGenerate={true}
+                      onSetsChange={(nextSets) =>
+                        setVariantSetMap((current) => ({
+                          ...current,
+                          [selectedTemplate.id]: nextSets,
+                        }))
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

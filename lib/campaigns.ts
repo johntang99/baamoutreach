@@ -2,6 +2,7 @@ import {
   buildGmailComposeUrl,
   interpolateTemplate,
   isRoleMailbox,
+  toGmailPlainTextBody,
 } from "@/lib/single-send";
 
 export function normalizeIntervalRange(
@@ -85,7 +86,7 @@ export function buildRenderedSend({
   };
 
   const subject = interpolateTemplate(subjectTemplate, values).trim();
-  const body = interpolateTemplate(bodyTemplate, values).trim();
+  const body = toGmailPlainTextBody(interpolateTemplate(bodyTemplate, values));
   const gmailComposeUrl = buildGmailComposeUrl({ to: email, subject, body });
 
   return {

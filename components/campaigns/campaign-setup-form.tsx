@@ -5,6 +5,10 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import {
+  TemplateVariantSetsPanel,
+  type TemplateVariantSetRow,
+} from "@/components/templates/template-variant-sets-panel";
 
 type TemplateOption = {
   id: string;
@@ -18,18 +22,21 @@ type ReadyListOption = {
   id: string;
   name: string;
   ready_row_count: number;
-  template_variants: unknown[] | null;
 };
 
 interface CampaignSetupFormProps {
   templates: TemplateOption[];
   readyLists: ReadyListOption[];
+  templateVariantSets: TemplateVariantSetRow[];
   preselectedListId: string;
-  defaultDailyCap: number;
-  defaultHardCap: number;
-  defaultMinIntervalSeconds: number;
-  defaultMaxIntervalSeconds: number;
-  defaultAllowRoleBasedRecipients: boolean;
+  preselectedTemplateId?: string;
+  preselectedVariantSetId?: string;
+  initialCampaignName?: string;
+  initialDailyCap: number;
+  initialHardCap: number;
+  initialMinIntervalSeconds: number;
+  initialMaxIntervalSeconds: number;
+  initialAllowRoleBasedRecipients: boolean;
   maxDailyCap: number;
   maxHardCap: number;
   createCampaignAction: (formData: FormData) => void | Promise<void>;
@@ -88,12 +95,16 @@ function toPreviewMarkdown(value: string) {
 export function CampaignSetupForm({
   templates,
   readyLists,
+  templateVariantSets,
   preselectedListId,
-  defaultDailyCap,
-  defaultHardCap,
-  defaultMinIntervalSeconds,
-  defaultMaxIntervalSeconds,
-  defaultAllowRoleBasedRecipients,
+  preselectedTemplateId = "",
+  preselectedVariantSetId = "",
+  initialCampaignName = "",
+  initialDailyCap,
+  initialHardCap,
+  initialMinIntervalSeconds,
+  initialMaxIntervalSeconds,
+  initialAllowRoleBasedRecipients,
   maxDailyCap,
   maxHardCap,
   createCampaignAction,
@@ -101,7 +112,10 @@ export function CampaignSetupForm({
   const [notesOpen, setNotesOpen] = useState(false);
   const [templatePreviewOpen, setTemplatePreviewOpen] = useState(false);
 
-  const initialTemplateId = templates[0]?.id ?? "";
+  const initialTemplateId =
+    preselectedTemplateId && templates.some((template) => template.id === preselectedTemplateId)
+      ? preselectedTemplateId
+      : templates[0]?.id ?? "";
   const [selectedTemplateId, setSelectedTemplateId] = useState(initialTemplateId);
 
   const initialListId =
@@ -109,10 +123,23 @@ export function CampaignSetupForm({
       ? preselectedListId
       : readyLists[0]?.id ?? "";
   const [selectedListId, setSelectedListId] = useState(initialListId);
+  const initialVariantSetId =
+    preselectedVariantSetId &&
+    templateVariantSets.some(
+      (set) =>
+        set.id === preselectedVariantSetId && set.template_id === initialTemplateId,
+    )
+      ? preselectedVariantSetId
+      : "";
+  const [selectedVariantSetId, setSelectedVariantSetId] = useState(initialVariantSetId);
 
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates],
+  );
+  const variantSetsForTemplate = useMemo(
+    () => templateVariantSets.filter((set) => set.template_id === selectedTemplateId),
+    [templateVariantSets, selectedTemplateId],
   );
 
   const hasReadyLists = readyLists.length > 0;
@@ -128,6 +155,7 @@ export function CampaignSetupForm({
             type="text"
             required
             placeholder="TCM NYC Batch A"
+            defaultValue={initialCampaignName}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
         </label>
@@ -139,7 +167,10 @@ export function CampaignSetupForm({
               name="template_id"
               required
               value={selectedTemplateId}
-              onChange={(event) => setSelectedTemplateId(event.target.value)}
+              onChange={(event) => {
+                setSelectedTemplateId(event.target.value);
+                setSelectedVariantSetId("");
+              }}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
             >
               {templates.map((template) => (
@@ -162,6 +193,24 @@ export function CampaignSetupForm({
           </p>
         </div>
 
+        <input type="hidden" name="template_variant_set_id" value={selectedVariantSetId} />
+
+        <div className="grid gap-1">
+          <span className="text-xs font-medium text-slate-600">Variant set (optional)</span>
+          <TemplateVariantSetsPanel
+            key={`campaign-variant-sets-${selectedTemplateId}`}
+            templateId={selectedTemplateId}
+            initialSets={variantSetsForTemplate}
+            defaultSelectedSetId={selectedVariantSetId || null}
+            canEdit={true}
+            allowGenerate={false}
+            onSelectionChange={(setId) => setSelectedVariantSetId(setId ?? "")}
+          />
+          <p className="text-xs text-slate-500">
+            Choose one set (Var-A / Var-B...) to apply fixed 1-5 round-robin order during prepare.
+          </p>
+        </div>
+
         <div className="grid gap-1">
           <span className="text-xs font-medium text-slate-600">
             Recipient list (single list only)
@@ -175,11 +224,7 @@ export function CampaignSetupForm({
           >
             {readyLists.map((list) => (
               <option key={list.id} value={list.id}>
-                {list.name} ({list.ready_row_count} ready
-                {Array.isArray(list.template_variants) && list.template_variants.length > 0
-                  ? ", AI variants ready"
-                  : ""}
-                )
+                {list.name} ({list.ready_row_count} ready)
               </option>
             ))}
           </select>
@@ -198,7 +243,7 @@ export function CampaignSetupForm({
               type="number"
               min={1}
               max={maxDailyCap}
-              defaultValue={defaultDailyCap}
+              defaultValue={initialDailyCap}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
@@ -209,7 +254,7 @@ export function CampaignSetupForm({
               type="number"
               min={1}
               max={maxHardCap}
-              defaultValue={defaultHardCap}
+              defaultValue={initialHardCap}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
@@ -222,7 +267,7 @@ export function CampaignSetupForm({
               name="min_interval_seconds"
               type="number"
               min={30}
-              defaultValue={defaultMinIntervalSeconds}
+              defaultValue={initialMinIntervalSeconds}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
@@ -232,7 +277,7 @@ export function CampaignSetupForm({
               name="max_interval_seconds"
               type="number"
               min={30}
-              defaultValue={defaultMaxIntervalSeconds}
+              defaultValue={initialMaxIntervalSeconds}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
@@ -242,7 +287,7 @@ export function CampaignSetupForm({
           <input
             name="include_role_emails"
             type="checkbox"
-            defaultChecked={defaultAllowRoleBasedRecipients}
+            defaultChecked={initialAllowRoleBasedRecipients}
           />
           Include role-based mailboxes (info@, contact@, admin@)
         </label>

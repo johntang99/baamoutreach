@@ -12,6 +12,8 @@ export interface RewriteInputs {
   currentSubject: string;
   language: RewriteLang;
   tone: RewriteTone;
+  mustInclude?: string;
+  mustAvoid?: string;
 }
 
 const LANG_NAME: Record<RewriteLang, string> = {
@@ -28,6 +30,15 @@ const TONE_GUIDE: Record<RewriteTone, string> = {
 };
 
 function buildSystemPrompt(inputs: RewriteInputs) {
+  const includeNotes =
+    inputs.mustInclude && inputs.mustInclude.trim().length > 0
+      ? `Additional must-include guidance: ${inputs.mustInclude.trim()}`
+      : "Additional must-include guidance: N/A";
+  const avoidNotes =
+    inputs.mustAvoid && inputs.mustAvoid.trim().length > 0
+      ? `Additional must-avoid guidance: ${inputs.mustAvoid.trim()}`
+      : "Additional must-avoid guidance: N/A";
+
   return [
     "You rewrite outbound outreach emails for business contacts.",
     "",
@@ -40,6 +51,8 @@ function buildSystemPrompt(inputs: RewriteInputs) {
     "3. Subject should stay under 90 characters.",
     "4. Body should stay under 220 words.",
     "5. No emojis. No all caps.",
+    `6. ${includeNotes}`,
+    `7. ${avoidNotes}`,
     "",
     'Return JSON only in this shape: {"subject":"...","body":"..."}',
   ].join("\n");

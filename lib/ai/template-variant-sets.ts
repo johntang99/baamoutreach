@@ -4,35 +4,33 @@ import {
   type RewriteLang,
   type RewriteTone,
 } from "@/lib/ai/rewrite-body";
+import type { TemplateVariantRow } from "@/lib/template-variant-sets";
 
-export interface ListVariant {
-  subject: string;
-  body: string;
-  tone: RewriteTone;
-}
+const VARIANT_TONES: RewriteTone[] = ["brief", "professional", "casual", "warm"];
 
-export interface GenerateListVariantsOptions {
+export interface GenerateTemplateVariantSetOptions {
   baseSubject: string;
   baseBody: string;
   language: RewriteLang;
+  mustInclude?: string;
+  mustAvoid?: string;
 }
 
-export interface GenerateListVariantsResult {
+export interface GenerateTemplateVariantSetResult {
   ok: boolean;
-  variants?: ListVariant[];
+  variants?: TemplateVariantRow[];
   fallbackCount?: number;
   error?: string;
 }
 
-const VARIANT_TONES: RewriteTone[] = ["brief", "professional", "casual", "warm"];
-
-export async function generateListVariants(
-  options: GenerateListVariantsOptions,
-): Promise<GenerateListVariantsResult> {
-  const variant0: ListVariant = {
+export async function generateTemplateVariantSet(
+  options: GenerateTemplateVariantSetOptions,
+): Promise<GenerateTemplateVariantSetResult> {
+  const baseVariant: TemplateVariantRow = {
     subject: options.baseSubject,
     body: options.baseBody,
-    tone: "warm",
+    tone: "base",
+    edited_at: null,
   };
 
   const rewrites = await Promise.all(
@@ -42,6 +40,8 @@ export async function generateListVariants(
         currentSubject: options.baseSubject,
         language: options.language,
         tone,
+        mustInclude: options.mustInclude,
+        mustAvoid: options.mustAvoid,
       });
 
       if (!result.ok || !result.subject || !result.body) {
@@ -52,21 +52,13 @@ export async function generateListVariants(
         subject: result.subject,
         body: result.body,
         tone,
-      } satisfies ListVariant;
+        edited_at: null,
+      } satisfies TemplateVariantRow;
     }),
   );
 
-  const aiVariants = rewrites.filter((row): row is ListVariant => row !== null);
-  if (aiVariants.length === 0) {
-    return {
-      ok: false,
-      error:
-        "AI couldn't generate variants right now. Please retry, or check Anthropic API setup.",
-    };
-  }
-
   const finalized = VARIANT_TONES.map((tone) => {
-    const matched = aiVariants.find((variant) => variant.tone === tone);
+    const matched = rewrites.find((row) => row?.tone === tone);
     if (matched) {
       return matched;
     }
@@ -74,7 +66,8 @@ export async function generateListVariants(
       subject: options.baseSubject,
       body: options.baseBody,
       tone,
-    } satisfies ListVariant;
+      edited_at: null,
+    } satisfies TemplateVariantRow;
   });
 
   const fallbackCount = finalized.reduce(
@@ -85,9 +78,22 @@ export async function generateListVariants(
     0,
   );
 
+  const hasAnyAiRewrite = finalized.some(
+    (variant) =>
+      !(variant.subject === options.baseSubject && variant.body === options.baseBody),
+  );
+
+  if (!hasAnyAiRewrite) {
+    return {
+      ok: false,
+      error:
+        "AI could not generate variants right now. Please retry or verify AI configuration.",
+    };
+  }
+
   return {
     ok: true,
-    variants: [variant0, ...finalized],
+    variants: [baseVariant, ...finalized],
     fallbackCount,
   };
 }

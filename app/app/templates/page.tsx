@@ -8,9 +8,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrCreatePrimaryWorkspace } from "@/lib/workspaces";
 import { isMissingTableError, toSafeText } from "@/lib/single-send";
 import { logWorkspaceAudit } from "@/lib/audit";
+import { parseTemplateVariantRows } from "@/lib/template-variant-sets";
 import { TemplateLibraryTable } from "@/components/templates/template-library-table";
 import { TemplateStarterGrid } from "@/components/templates/template-starter-grid";
 import { TemplateAiGenerator } from "@/components/templates/template-ai-generator";
+import type { TemplateVariantSetRow } from "@/components/templates/template-variant-sets-panel";
 
 export default async function TemplatesPage({
   searchParams,
@@ -118,7 +120,38 @@ export default async function TemplatesPage({
     .order("created_at", { ascending: false })
     .limit(200);
 
-  const schemaMissing = isMissingTableError(templatesError);
+  const { data: variantSets, error: variantSetsError } = await supabase
+    .from("template_variant_sets")
+    .select(
+      "id, template_id, name, language, generation_notes, variants, updated_at",
+    )
+    .eq("workspace_id", workspace.workspaceId)
+    .order("created_at", { ascending: true });
+
+  const schemaMissing =
+    isMissingTableError(templatesError) || isMissingTableError(variantSetsError);
+  if (variantSetsError && !isMissingTableError(variantSetsError)) {
+    throw variantSetsError;
+  }
+  const variantSetsByTemplate = (variantSets ?? []).reduce<Record<string, TemplateVariantSetRow[]>>(
+    (acc, row) => {
+      const key = row.template_id;
+      if (!acc[key]) {
+        acc[key] = [];
+      }
+      acc[key].push({
+        id: row.id,
+        template_id: row.template_id,
+        name: row.name,
+        language: row.language as "en" | "zh" | "es",
+        generation_notes: (row.generation_notes as Record<string, unknown>) ?? {},
+        variants: parseTemplateVariantRows(row.variants),
+        updated_at: row.updated_at,
+      });
+      return acc;
+    },
+    {},
+  );
 
   return (
     <div className="grid gap-3">
@@ -141,9 +174,13 @@ export default async function TemplatesPage({
       {schemaMissing ? (
         <SectionCard title="Database migration required">
           <p className="text-sm leading-6 text-slate-600">
-            Templates table is not ready. Run
+            Template tables are not ready. Run
             <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
               supabase/migrations/0002_single_send_mvp.sql
+            </code>
+            and
+            <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+              supabase/migrations/0011_template_variant_sets.sql
             </code>
             and refresh.
           </p>
@@ -247,6 +284,7 @@ export default async function TemplatesPage({
               <SectionCard title="Template library">
                 <TemplateLibraryTable
                   templates={templates ?? []}
+                  variantSetsByTemplate={variantSetsByTemplate}
                   initialOpenTemplateId={openTemplateId}
                 />
               </SectionCard>

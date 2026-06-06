@@ -7,6 +7,7 @@ import {
   interpolateTemplate,
   isMissingTableError,
   isRoleMailbox,
+  toGmailPlainTextBody,
   toSafeText,
 } from "@/lib/single-send";
 
@@ -158,7 +159,9 @@ export async function POST(request: Request) {
   };
 
   const subject = interpolateTemplate(template.subject_template, mergeValues).trim();
-  const body = interpolateTemplate(template.body_template, mergeValues).trim();
+  const body = toGmailPlainTextBody(
+    interpolateTemplate(template.body_template, mergeValues),
+  );
 
   if (!subject || !body) {
     return NextResponse.json(

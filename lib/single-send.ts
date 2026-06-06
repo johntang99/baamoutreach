@@ -24,6 +24,23 @@ export interface TemplateLite {
   body_template: string;
 }
 
+export function toGmailPlainTextBody(input: string) {
+  return input
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt: string, url: string) => {
+      const safeAlt = alt.trim();
+      return safeAlt ? `${safeAlt} (${url})` : url;
+    })
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+}
+
 export function interpolateTemplate(
   template: string,
   values: Record<string, string>,
