@@ -426,9 +426,9 @@ export function TemplateLibraryTable({
       </div>
 
       {selectedTemplate ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
-            <div className="mb-3 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/30 px-4 py-6">
+          <div className="mx-auto my-2 flex w-full max-w-2xl max-h-[calc(100vh-3rem)] flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between shrink-0">
               <h3 className="text-sm font-semibold text-slate-900">
                 {selectedTemplate.name} ({selectedTemplate.campaign_type})
               </h3>
@@ -518,19 +518,20 @@ export function TemplateLibraryTable({
               </div>
             </div>
 
-            {modalError ? (
-              <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                {modalError}
-              </p>
-            ) : null}
-            {modalMessage ? (
-              <p className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                {modalMessage}
-              </p>
-            ) : null}
+            <div className="overflow-y-auto pr-1">
+              {modalError ? (
+                <p className="mb-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                  {modalError}
+                </p>
+              ) : null}
+              {modalMessage ? (
+                <p className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                  {modalMessage}
+                </p>
+              ) : null}
 
-            {isEditing ? (
-              <div className="grid gap-2 text-sm text-slate-700">
+              {isEditing ? (
+                <div className="grid gap-2 text-sm text-slate-700">
                 <label className="grid gap-1">
                   <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                     Name
@@ -687,9 +688,9 @@ export function TemplateLibraryTable({
                     />
                   </div>
                 ) : null}
-              </div>
-            ) : (
-              <div className="space-y-2 text-sm text-slate-700">
+                </div>
+              ) : (
+                <div className="space-y-2 text-sm text-slate-700">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                     Status
@@ -734,8 +735,9 @@ export function TemplateLibraryTable({
                     />
                   </div>
                 ) : null}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ) : null}
