@@ -10,6 +10,7 @@ type CampaignRecipientRow = {
   email: string;
   status: string;
   risk_level: string;
+  variant_index: number | null;
   scheduled_at: string | null;
   opened_at: string | null;
   sent_at: string | null;
@@ -112,6 +113,7 @@ export function CampaignRecipientTable({
                 "Recipient",
                 "Company",
                 "Email",
+                "Variant",
                 "Status",
                 "Risk",
                 "Scheduled",
@@ -139,6 +141,9 @@ export function CampaignRecipientTable({
                 </td>
                 <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
                   {recipient.email}
+                </td>
+                <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
+                  {recipient.variant_index !== null ? `#${recipient.variant_index + 1}` : "-"}
                 </td>
                 <td className="border-b border-slate-200 px-3 py-2 text-slate-700">
                   <span

@@ -141,6 +141,11 @@ export function CampaignSetupForm({
     () => templateVariantSets.filter((set) => set.template_id === selectedTemplateId),
     [templateVariantSets, selectedTemplateId],
   );
+  const selectedVariantSet = useMemo(
+    () =>
+      variantSetsForTemplate.find((set) => set.id === selectedVariantSetId) ?? null,
+    [selectedVariantSetId, variantSetsForTemplate],
+  );
 
   const hasReadyLists = readyLists.length > 0;
   const hasTemplates = templates.length > 0;
@@ -193,7 +198,12 @@ export function CampaignSetupForm({
           </p>
         </div>
 
-        <input type="hidden" name="template_variant_set_id" value={selectedVariantSetId} />
+          <input
+            type="hidden"
+            name="template_variant_set_id"
+            value={selectedVariantSetId}
+            readOnly
+          />
 
         <div className="grid gap-1">
           <span className="text-xs font-medium text-slate-600">Variant set (optional)</span>
@@ -206,6 +216,17 @@ export function CampaignSetupForm({
             allowGenerate={false}
             onSelectionChange={(setId) => setSelectedVariantSetId(setId ?? "")}
           />
+          {selectedVariantSet ? (
+            <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              Round-robin active for{" "}
+              <span className="font-semibold text-blue-900">{selectedVariantSet.name}</span>: recipients are
+              assigned Variant #1 - #5 in order, then repeat.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500">
+              No variant set selected. Campaign sends using the base template only.
+            </p>
+          )}
           <p className="text-xs text-slate-500">
             Choose one set (Var-A / Var-B...) to apply fixed 1-5 round-robin order during prepare.
           </p>

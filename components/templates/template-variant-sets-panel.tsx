@@ -125,6 +125,10 @@ export function TemplateVariantSetsPanel({
     onSelectionChange?.(fallbackSelection);
   }
 
+  useEffect(() => {
+    onSelectionChange?.(effectiveSelectedSetId);
+  }, [effectiveSelectedSetId, onSelectionChange]);
+
   async function requestJson(
     input: RequestInfo | URL,
     init?: RequestInit,

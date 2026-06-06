@@ -320,17 +320,10 @@ export default async function CampaignsPage({
 
     const variantAssignment = new Map<number, number>();
     const activeVariants = selectedVariantSet?.variants ?? [];
-    const variantLanguage = selectedVariantSet?.language ?? sourceList.defaultLanguage;
 
     if (activeVariants.length > 0) {
-      const eligibleIndices: number[] = [];
-      sourceRecipients.forEach((recipient, index) => {
-        if (recipient.language === variantLanguage) {
-          eligibleIndices.push(index);
-        }
-      });
-      eligibleIndices.forEach((recipientIndex, slot) => {
-        variantAssignment.set(recipientIndex, slot % activeVariants.length);
+      sourceRecipients.forEach((_, recipientIndex) => {
+        variantAssignment.set(recipientIndex, recipientIndex % activeVariants.length);
       });
     }
 
@@ -870,6 +863,11 @@ export default async function CampaignsPage({
                   <p className="text-[11px] text-slate-500">
                     Variant set: {templateVariantSetInfo?.name ?? "None"}
                   </p>
+                  {templateVariantSetInfo ? (
+                    <p className="text-[11px] text-blue-700">
+                      Distribution: Round-robin (#1 - #5)
+                    </p>
+                  ) : null}
                   <p className="text-[11px] text-slate-500">
                     Source: {sourceListInfo?.name ?? "-"}
                   </p>
