@@ -33,10 +33,11 @@ export async function POST(request: Request) {
   const workspaceId = toSafeText(payload.workspaceId);
   const contactId = toSafeText(payload.contactId);
   const templateId = toSafeText(payload.templateId);
+  const senderSettingId = toSafeText(payload.senderSettingId);
 
-  if (!workspaceId || !contactId || !templateId) {
+  if (!workspaceId || !contactId || !templateId || !senderSettingId) {
     return NextResponse.json(
-      { error: "workspaceId, contactId, and templateId are required." },
+      { error: "workspaceId, contactId, templateId, and senderSettingId are required." },
       { status: 400 },
     );
   }
@@ -73,6 +74,44 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Viewer role cannot prepare sends." },
       { status: 403 },
+    );
+  }
+
+  const { data: senderSetting, error: senderError } = await supabase
+    .from("workspace_sender_settings")
+    .select("id, send_from_name, gmail_preset_email, reply_to_email, is_verified")
+    .eq("id", senderSettingId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  if (senderError) {
+    if (isMissingTableError(senderError)) {
+      return NextResponse.json(
+        {
+          error:
+            "Sender settings table is not ready. Run supabase/migrations/0004_policy_and_audit.sql and retry.",
+        },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({ error: senderError.message }, { status: 400 });
+  }
+
+  if (!senderSetting) {
+    return NextResponse.json({ error: "Selected sender not found." }, { status: 404 });
+  }
+
+  const senderEmail = (
+    senderSetting.gmail_preset_email ??
+    senderSetting.reply_to_email ??
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  if (!senderEmail) {
+    return NextResponse.json(
+      { error: "Selected sender has no Gmail preset or reply-to email configured." },
+      { status: 400 },
     );
   }
 
@@ -182,6 +221,7 @@ export async function POST(request: Request) {
     to: contact.email,
     subject,
     body,
+    senderGmail: senderEmail,
   });
 
   const { data: sendRequest, error: sendRequestError } = await supabase
@@ -216,6 +256,8 @@ export async function POST(request: Request) {
       contact_email: contact.email,
       risk_level: riskLevel,
       risk_notes: riskNotes,
+      sender_setting_id: senderSetting.id,
+      sender_email: senderEmail,
     },
     created_by: user.id,
   });
@@ -229,6 +271,8 @@ export async function POST(request: Request) {
     metadata: {
       contactId: contact.id,
       templateId: template.id,
+      senderSettingId: senderSetting.id,
+      senderEmail,
       riskLevel,
       riskNotes,
     },
@@ -241,5 +285,7 @@ export async function POST(request: Request) {
     body,
     riskLevel,
     riskNotes,
+    senderSettingId: senderSetting.id,
+    senderEmail,
   });
 }

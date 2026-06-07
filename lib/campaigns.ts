@@ -70,12 +70,14 @@ export function buildRenderedSend({
   companyName,
   subjectTemplate,
   bodyTemplate,
+  senderGmail,
 }: {
   email: string;
   fullName: string;
   companyName: string | null;
   subjectTemplate: string;
   bodyTemplate: string;
+  senderGmail?: string | null;
 }) {
   const values = {
     name: fullName ?? "",
@@ -87,7 +89,12 @@ export function buildRenderedSend({
 
   const subject = interpolateTemplate(subjectTemplate, values).trim();
   const body = toGmailPlainTextBody(interpolateTemplate(bodyTemplate, values));
-  const gmailComposeUrl = buildGmailComposeUrl({ to: email, subject, body });
+  const gmailComposeUrl = buildGmailComposeUrl({
+    to: email,
+    subject,
+    body,
+    senderGmail,
+  });
 
   return {
     subject,

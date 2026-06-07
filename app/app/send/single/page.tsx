@@ -12,6 +12,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrCreatePrimaryWorkspace } from "@/lib/workspaces";
 import { getWorkspacePolicyDefaults } from "@/lib/policies";
 
+type SenderOption = {
+  id: string;
+  send_from_name: string | null;
+  gmail_preset_email: string | null;
+  reply_to_email: string | null;
+  is_verified: boolean;
+};
+
 async function ensureDefaultTemplate(
   supabase: Awaited<ReturnType<typeof createClient>>,
   workspaceId: string,
@@ -67,14 +75,27 @@ export default async function SingleSendPage() {
     .order("created_at", { ascending: false })
     .limit(100);
 
+  const { data: senderRows, error: senderError } = await supabase
+    .from("workspace_sender_settings")
+    .select("id, send_from_name, gmail_preset_email, reply_to_email, is_verified")
+    .eq("workspace_id", workspace.workspaceId)
+    .order("created_at", { ascending: true })
+    .limit(100);
+
   const schemaMissing =
     isMissingTableError(contactsError) || isMissingTableError(templatesError);
+  const senderSchemaMissing = isMissingTableError(senderError);
+  if (senderError && !senderSchemaMissing) {
+    throw senderError;
+  }
 
   const safeContacts: ContactLite[] = (contacts ?? []) as ContactLite[];
   const safeTemplates: TemplateLite[] = (templates ?? []) as TemplateLite[];
+  const safeSenders: SenderOption[] = (senderRows ?? []) as SenderOption[];
   const hasContacts = safeContacts.length > 0;
   const hasTemplates = safeTemplates.length > 0;
-  const readyToSend = hasContacts && hasTemplates;
+  const hasSenders = safeSenders.length > 0;
+  const readyToSend = hasContacts && hasTemplates && hasSenders;
 
   return (
     <div className="grid gap-3">
@@ -107,7 +128,7 @@ export default async function SingleSendPage() {
       </SectionCard>
 
       {!schemaMissing ? (
-        <SectionCard title="Quick start: first single send in 3 steps">
+        <SectionCard title="Quick start: first single send in 4 steps">
           <ol className="grid gap-2 text-sm">
             <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
               <span className="mr-2 text-xs font-semibold text-slate-500">Step 1</span>
@@ -139,8 +160,22 @@ export default async function SingleSendPage() {
             </li>
             <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
               <span className="mr-2 text-xs font-semibold text-slate-500">Step 3</span>
+              <span className="font-medium text-slate-800">Configure at least one sender.</span>
+              <span
+                className={`ml-2 text-xs font-semibold ${
+                  hasSenders ? "text-emerald-700" : "text-amber-700"
+                }`}
+              >
+                {hasSenders ? "Done" : "Pending"}
+              </span>
+              <Link href="/app/settings/sender" className="ml-3 text-xs font-medium text-blue-600 hover:text-blue-700">
+                Open Sender Settings
+              </Link>
+            </li>
+            <li className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="mr-2 text-xs font-semibold text-slate-500">Step 4</span>
               <span className="font-medium text-slate-800">
-                Choose contact + template, then click the Prepare and open in Gmail button.
+                Choose sender + contact + template, then click Prepare and open in Gmail.
               </span>
               <span
                 className={`ml-2 text-xs font-semibold ${
@@ -153,6 +188,22 @@ export default async function SingleSendPage() {
           </ol>
           <p className="mt-2 text-xs text-slate-500">
             After Gmail opens, review the message, then send manually in Gmail to keep the flow safe and controlled.
+          </p>
+        </SectionCard>
+      ) : null}
+
+      {senderSchemaMissing ? (
+        <SectionCard title="Sender settings migration required">
+          <p className="text-sm leading-6 text-slate-600">
+            Sender selection for Single Send needs sender tables. Please run
+            <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+              supabase/migrations/0004_policy_and_audit.sql
+            </code>
+            and
+            <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+              supabase/migrations/0012_workspace_multiple_senders.sql
+            </code>
+            first.
           </p>
         </SectionCard>
       ) : null}
@@ -170,7 +221,8 @@ export default async function SingleSendPage() {
       ) : !readyToSend ? (
         <SectionCard title="Complete setup to unlock composer">
           <p className="text-sm leading-6 text-slate-600">
-            First-time setup is incomplete. Finish the pending quick-start steps above, then the composer will appear here.
+            First-time setup is incomplete. Finish the pending quick-start steps above,
+            including Sender Settings, then the composer will appear here.
           </p>
         </SectionCard>
       ) : (
@@ -178,6 +230,7 @@ export default async function SingleSendPage() {
           workspaceId={workspace.workspaceId}
           contacts={safeContacts}
           templates={safeTemplates}
+          senderOptions={safeSenders}
         />
       )}
     </div>

@@ -54,19 +54,32 @@ export function buildGmailComposeUrl({
   to,
   subject,
   body,
+  senderGmail,
 }: {
   to: string;
   subject: string;
   body: string;
+  senderGmail?: string | null;
 }) {
-  const base = "https://mail.google.com/mail/?view=cm&fs=1";
+  const base = "https://mail.google.com/mail/?view=cm&fs=1&tf=1";
   const params = new URLSearchParams({
     to,
     su: subject,
     body,
   });
 
-  return `${base}&${params.toString()}`;
+  const composeBase = `${base}&${params.toString()}`;
+  const normalizedSender = (senderGmail ?? "").trim().toLowerCase();
+  if (!normalizedSender) {
+    return composeBase;
+  }
+
+  const continueUrl = `${composeBase}&authuser=${encodeURIComponent(normalizedSender)}`;
+  return (
+    "https://accounts.google.com/AccountChooser" +
+    `?Email=${encodeURIComponent(normalizedSender)}` +
+    `&continue=${encodeURIComponent(continueUrl)}`
+  );
 }
 
 export function isRoleMailbox(email: string) {

@@ -208,6 +208,21 @@ export default async function CampaignsPage({
           encodeURIComponent(selectedSenderError?.message ?? "Selected sender not found."),
       );
     }
+    const selectedSenderEmail = (
+      selectedSender.gmail_preset_email ??
+      selectedSender.reply_to_email ??
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    if (!selectedSenderEmail) {
+      redirect(
+        "/app/campaigns?error=" +
+          encodeURIComponent(
+            "Selected sender has no Gmail preset or reply-to email configured.",
+          ),
+      );
+    }
 
     const sourceList = {
       id: selectedList.id,
@@ -377,6 +392,7 @@ export default async function CampaignsPage({
         companyName: recipient.companyName,
         subjectTemplate,
         bodyTemplate,
+        senderGmail: selectedSenderEmail,
       });
 
       if (!rendered.subject || !rendered.body) {

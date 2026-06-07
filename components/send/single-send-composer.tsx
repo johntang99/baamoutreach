@@ -3,10 +3,19 @@
 import { useMemo, useState } from "react";
 import type { ContactLite, TemplateLite } from "@/lib/single-send";
 
+interface SenderOption {
+  id: string;
+  send_from_name: string | null;
+  gmail_preset_email: string | null;
+  reply_to_email: string | null;
+  is_verified: boolean;
+}
+
 interface SingleSendComposerProps {
   workspaceId: string;
   contacts: ContactLite[];
   templates: TemplateLite[];
+  senderOptions: SenderOption[];
 }
 
 function interpolate(template: string, values: Record<string, string>) {
@@ -19,7 +28,9 @@ export function SingleSendComposer({
   workspaceId,
   contacts,
   templates,
+  senderOptions,
 }: SingleSendComposerProps) {
+  const [senderSettingId, setSenderSettingId] = useState(senderOptions[0]?.id ?? "");
   const [contactId, setContactId] = useState(contacts[0]?.id ?? "");
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -36,6 +47,12 @@ export function SingleSendComposer({
     () => templates.find((template) => template.id === templateId),
     [templates, templateId],
   );
+  const selectedSender = useMemo(
+    () => senderOptions.find((sender) => sender.id === senderSettingId),
+    [senderOptions, senderSettingId],
+  );
+  const selectedSenderEmail =
+    selectedSender?.gmail_preset_email ?? selectedSender?.reply_to_email ?? "";
 
   const preview = useMemo(() => {
     if (!selectedContact || !selectedTemplate) {
@@ -57,8 +74,12 @@ export function SingleSendComposer({
   }, [selectedContact, selectedTemplate]);
 
   async function handlePrepareSend() {
-    if (!contactId || !templateId) {
-      setError("Please choose both contact and template.");
+    if (!senderSettingId || !contactId || !templateId) {
+      setError("Please choose sender, contact, and template.");
+      return;
+    }
+    if (!selectedSenderEmail) {
+      setError("Selected sender has no Gmail preset or reply-to email.");
       return;
     }
 
@@ -75,6 +96,7 @@ export function SingleSendComposer({
         },
         body: JSON.stringify({
           workspaceId,
+          senderSettingId,
           contactId,
           templateId,
         }),
@@ -84,6 +106,7 @@ export function SingleSendComposer({
         error?: string;
         gmailUrl?: string;
         requestId?: string;
+        senderEmail?: string;
         riskLevel?: string;
         riskNotes?: string[];
       };
@@ -99,7 +122,10 @@ export function SingleSendComposer({
         );
       }
 
-      setSuccess(`Draft ${data.requestId} prepared. Opening Gmail compose...`);
+      const effectiveSenderEmail = data.senderEmail ?? selectedSenderEmail;
+      setSuccess(
+        `Draft ${data.requestId} prepared. Opening Gmail as ${effectiveSenderEmail || "selected sender"}...`,
+      );
       window.open(data.gmailUrl, "_blank", "noopener,noreferrer");
     } catch {
       setError("Network error while preparing send.");
@@ -113,6 +139,32 @@ export function SingleSendComposer({
       <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
         <h2 className="text-sm font-semibold text-slate-900">Compose</h2>
         <div className="mt-3 grid gap-3">
+          <label className="grid gap-1">
+            <span className="text-xs font-medium text-slate-600">Sender</span>
+            <select
+              value={senderSettingId}
+              onChange={(event) => setSenderSettingId(event.target.value)}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              {senderOptions.map((sender) => (
+                <option key={sender.id} value={sender.id}>
+                  {sender.send_from_name || "Unnamed sender"} (
+                  {sender.gmail_preset_email || sender.reply_to_email || "No sender email"})
+                  {sender.is_verified ? " • verified" : ""}
+                </option>
+              ))}
+            </select>
+            {selectedSenderEmail ? (
+              <p className="text-[11px] text-slate-500">
+                Opening Gmail as: <span className="font-medium text-slate-700">{selectedSenderEmail}</span>
+              </p>
+            ) : (
+              <p className="text-[11px] text-rose-700">
+                Selected sender has no usable email.
+              </p>
+            )}
+          </label>
+
           <label className="grid gap-1">
             <span className="text-xs font-medium text-slate-600">Contact</span>
             <select

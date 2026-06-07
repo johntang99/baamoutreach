@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { logWorkspaceAudit } from "@/lib/audit";
-import { isMissingTableError } from "@/lib/single-send";
+import { buildGmailComposeUrl, isMissingTableError } from "@/lib/single-send";
 
 function schemaMissingResponse() {
   return NextResponse.json(
@@ -30,7 +30,7 @@ export async function POST(
   const { data: campaign, error: campaignError } = await supabase
     .from("campaigns")
     .select(
-      "id, workspace_id, name, template_id, opened_count, status, min_interval_seconds, max_interval_seconds",
+      "id, workspace_id, name, template_id, sender_setting_id, opened_count, status, min_interval_seconds, max_interval_seconds",
     )
     .eq("id", id)
     .maybeSingle();
@@ -70,6 +70,46 @@ export async function POST(
       { error: "Viewer role cannot open queued recipients." },
       { status: 403 },
     );
+  }
+
+  let senderEmail: string | null = null;
+  if (campaign.sender_setting_id) {
+    const { data: senderSetting, error: senderError } = await supabase
+      .from("workspace_sender_settings")
+      .select("id, gmail_preset_email, reply_to_email")
+      .eq("workspace_id", campaign.workspace_id)
+      .eq("id", campaign.sender_setting_id)
+      .maybeSingle();
+
+    if (senderError) {
+      if (isMissingTableError(senderError)) {
+        return NextResponse.json(
+          {
+            error:
+              "Sender settings table not ready. Run supabase/migrations/0004_policy_and_audit.sql and retry.",
+          },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json({ error: senderError.message }, { status: 400 });
+    }
+
+    if (!senderSetting) {
+      return NextResponse.json(
+        { error: "Campaign sender not found. Re-select sender and prepare campaign again." },
+        { status: 400 },
+      );
+    }
+
+    senderEmail = (senderSetting.gmail_preset_email ?? senderSetting.reply_to_email ?? "")
+      .trim()
+      .toLowerCase();
+    if (!senderEmail) {
+      return NextResponse.json(
+        { error: "Selected campaign sender has no Gmail preset or reply-to email." },
+        { status: 400 },
+      );
+    }
   }
 
   const { data: existingOpenedRows, error: existingOpenedError } = await supabase
@@ -161,11 +201,19 @@ export async function POST(
   }
 
   if (nextRecipient) {
+    const gmailComposeUrl = buildGmailComposeUrl({
+      to: nextRecipient.email,
+      subject: nextRecipient.subject,
+      body: nextRecipient.body,
+      senderGmail: senderEmail,
+    });
+
     const { error: updateRecipientError } = await supabase
       .from("campaign_recipients")
       .update({
         status: "opened_gmail",
         opened_at: new Date().toISOString(),
+        gmail_compose_url: gmailComposeUrl,
       })
       .eq("id", nextRecipient.id)
       .eq("campaign_id", campaign.id);
@@ -182,7 +230,7 @@ export async function POST(
       status: "opened_gmail",
       subject: nextRecipient.subject,
       body: nextRecipient.body,
-      gmail_compose_url: nextRecipient.gmail_compose_url,
+      gmail_compose_url: gmailComposeUrl,
       risk_level: nextRecipient.risk_level,
       risk_notes: nextRecipient.risk_notes ?? [],
       created_by: user.id,
@@ -280,7 +328,12 @@ export async function POST(
     recipientId: nextRecipient.id,
     recipientEmail: nextRecipient.email,
     recipientName: nextRecipient.full_name,
-    gmailUrl: nextRecipient.gmail_compose_url,
+    gmailUrl: buildGmailComposeUrl({
+      to: nextRecipient.email,
+      subject: nextRecipient.subject,
+      body: nextRecipient.body,
+      senderGmail: senderEmail,
+    }),
     queuedCount,
     openedCount,
     sentCount,
