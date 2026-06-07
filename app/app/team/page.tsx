@@ -301,7 +301,9 @@ export default async function TeamPage({
       );
     }
 
-    const { data: targetMembership, error: targetError } = await serverSupabase
+    const actionAdmin = createAdminClient();
+
+    const { data: targetMembership, error: targetError } = await actionAdmin
       .from("workspace_memberships")
       .select("id, user_id, role")
       .eq("id", membershipId)
@@ -322,7 +324,7 @@ export default async function TeamPage({
       );
     }
 
-    const { count: ownerCount } = await serverSupabase
+    const { count: ownerCount } = await actionAdmin
       .from("workspace_memberships")
       .select("id", { count: "exact", head: true })
       .eq("workspace_id", actionWorkspace.workspaceId)
@@ -339,7 +341,7 @@ export default async function TeamPage({
       );
     }
 
-    const { error: updateError } = await serverSupabase
+    const { error: updateError } = await actionAdmin
       .from("workspace_memberships")
       .update({
         role: nextRole,
@@ -363,6 +365,88 @@ export default async function TeamPage({
     });
 
     redirect("/app/team?message=" + encodeURIComponent("Member role updated."));
+  }
+
+  async function removeMember(formData: FormData) {
+    "use server";
+
+    const membershipId = toSafeText(formData.get("membership_id"));
+    if (!membershipId) {
+      redirect("/app/team?error=" + encodeURIComponent("Membership id is required."));
+    }
+
+    const serverSupabase = await createClient();
+    const {
+      data: { user: actionUser },
+    } = await serverSupabase.auth.getUser();
+
+    if (!actionUser) {
+      redirect("/login?next=/app/team");
+    }
+
+    const actionWorkspace = await getOrCreatePrimaryWorkspace(
+      actionUser,
+      serverSupabase,
+    );
+    const actorRole = await getWorkspaceRole(
+      actionWorkspace.workspaceId,
+      actionUser.id,
+      serverSupabase,
+    );
+
+    if (actorRole !== "owner") {
+      redirect(
+        "/app/team?error=" +
+          encodeURIComponent("Only owner can remove team members."),
+      );
+    }
+
+    const actionAdmin = createAdminClient();
+
+    const { data: targetMembership, error: targetError } = await actionAdmin
+      .from("workspace_memberships")
+      .select("id, user_id, role")
+      .eq("id", membershipId)
+      .eq("workspace_id", actionWorkspace.workspaceId)
+      .maybeSingle();
+
+    if (targetError || !targetMembership) {
+      redirect(
+        "/app/team?error=" +
+          encodeURIComponent(targetError?.message ?? "Membership not found."),
+      );
+    }
+
+    if (targetMembership.role === "owner") {
+      redirect(
+        "/app/team?error=" +
+          encodeURIComponent("Owner can only remove operator/viewer."),
+      );
+    }
+
+    const { error: deleteError } = await actionAdmin
+      .from("workspace_memberships")
+      .delete()
+      .eq("id", targetMembership.id)
+      .eq("workspace_id", actionWorkspace.workspaceId);
+
+    if (deleteError) {
+      redirect("/app/team?error=" + encodeURIComponent(deleteError.message));
+    }
+
+    await logWorkspaceAudit({
+      workspaceId: actionWorkspace.workspaceId,
+      actorUserId: actionUser.id,
+      action: "team.member_removed",
+      entityType: "workspace_membership",
+      entityId: targetMembership.id,
+      metadata: {
+        removedUserId: targetMembership.user_id,
+        removedRole: targetMembership.role,
+      },
+    });
+
+    redirect("/app/team?message=" + encodeURIComponent("Member removed."));
   }
 
   async function revokeInvite(formData: FormData) {
@@ -622,24 +706,39 @@ export default async function TeamPage({
                         </td>
                         <td className="border-b border-slate-200 px-3 py-2">
                           {workspace.role === "owner" ? (
-                            <form action={updateMemberRole} className="flex items-center gap-2">
-                              <input type="hidden" name="membership_id" value={member.id} />
-                              <select
-                                name="next_role"
-                                defaultValue={member.role}
-                                className="rounded-md border border-slate-300 px-2 py-1 text-xs"
-                              >
-                                <option value="owner">Owner</option>
-                                <option value="operator">Operator</option>
-                                <option value="viewer">Viewer</option>
-                              </select>
-                              <button
-                                type="submit"
-                                className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                              >
-                                Update
-                              </button>
-                            </form>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <form action={updateMemberRole} className="flex items-center gap-2">
+                                <input type="hidden" name="membership_id" value={member.id} />
+                                <select
+                                  name="next_role"
+                                  defaultValue={member.role}
+                                  className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                                >
+                                  <option value="owner">Owner</option>
+                                  <option value="operator">Operator</option>
+                                  <option value="viewer">Viewer</option>
+                                </select>
+                                <button
+                                  type="submit"
+                                  className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                                >
+                                  Update
+                                </button>
+                              </form>
+                              {member.role === "owner" ? (
+                                <span className="text-slate-400">Owner not removable</span>
+                              ) : (
+                                <form action={removeMember}>
+                                  <input type="hidden" name="membership_id" value={member.id} />
+                                  <button
+                                    type="submit"
+                                    className="rounded-md border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50"
+                                  >
+                                    Remove
+                                  </button>
+                                </form>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-slate-400">Owner only</span>
                           )}

@@ -166,14 +166,6 @@ export function CampaignSetupForm({
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates],
   );
-  const selectedSender = useMemo(
-    () => senderOptions.find((sender) => sender.id === selectedSenderId) ?? null,
-    [selectedSenderId, senderOptions],
-  );
-  const selectedList = useMemo(
-    () => readyLists.find((list) => list.id === selectedListId) ?? null,
-    [selectedListId, readyLists],
-  );
   const variantSetsForTemplate = useMemo(
     () => localVariantSets.filter((set) => set.template_id === selectedTemplateId),
     [localVariantSets, selectedTemplateId],
@@ -279,41 +271,6 @@ export function CampaignSetupForm({
               >
                 Docs
               </Link>
-            </div>
-          </div>
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                Sender
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-800">
-                {selectedSender?.send_from_name ?? "Not selected"}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                Template
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-800">
-                {selectedTemplate?.name ?? "Not selected"}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                Recipient list
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-800">
-                {selectedList?.name ?? "Not selected"}
-              </p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                Variant
-              </p>
-              <p className="mt-1 text-sm font-medium text-slate-800">
-                {selectedVariantSet?.name ?? "Base template"}
-              </p>
             </div>
           </div>
 
@@ -735,7 +692,7 @@ export function CampaignSetupForm({
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                   Body
                 </p>
-                <div className="prose prose-sm mt-1 max-w-none text-slate-700">
+                <div className="prose prose-sm mt-1 max-w-none text-slate-700 [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5">
                   <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                     {toPreviewMarkdown(selectedTemplate.body_template)}
                   </ReactMarkdown>

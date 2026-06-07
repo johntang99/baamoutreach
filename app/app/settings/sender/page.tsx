@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader, SectionCard } from "@/components/product/page-primitives";
+import { GmailPresetField } from "@/components/settings/gmail-preset-field";
 import { logWorkspaceAudit } from "@/lib/audit";
 import { isMissingTableError, toSafeText } from "@/lib/single-send";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -640,12 +641,11 @@ export default async function SenderSettingsPage({
               </label>
               <label className="grid gap-1">
                 <span className="text-xs font-medium text-slate-600">Gmail preset email</span>
-                <input
+                <GmailPresetField
+                  id="add-gmail-preset-email"
                   name="gmail_preset_email"
-                  type="email"
                   required
                   placeholder="support@company.com"
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               </label>
               <label className="grid gap-1">
@@ -814,12 +814,12 @@ export default async function SenderSettingsPage({
               </label>
               <label className="grid gap-1">
                 <span className="text-xs font-medium text-slate-600">Gmail preset email</span>
-                <input
+                <GmailPresetField
+                  id={`edit-gmail-preset-email-${editingSender.id}`}
                   name="gmail_preset_email"
-                  type="email"
                   required
                   defaultValue={editingSender.gmail_preset_email ?? ""}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="support@company.com"
                 />
               </label>
               {hasTeamMembers ? (

@@ -660,7 +660,7 @@ export function TemplateLibraryTable({
                       <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
                         Markdown preview
                       </p>
-                      <div className="prose prose-sm mt-2 max-w-none text-slate-700">
+                      <div className="prose prose-sm mt-2 max-w-none text-slate-700 [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5">
                         <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                           {toPreviewMarkdown(editValues.bodyTemplate)}
                         </ReactMarkdown>
@@ -709,7 +709,7 @@ export function TemplateLibraryTable({
                   <p className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                     Body
                   </p>
-                  <div className="prose prose-sm mt-1 max-w-none text-slate-700">
+                  <div className="prose prose-sm mt-1 max-w-none text-slate-700 [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5">
                     <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
                       {toPreviewMarkdown(selectedTemplate.body_template)}
                     </ReactMarkdown>
