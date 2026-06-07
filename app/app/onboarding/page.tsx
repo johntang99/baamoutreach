@@ -43,7 +43,8 @@ export default async function OnboardingPage() {
       .from("workspace_sender_settings")
       .select("gmail_preset_email, reply_to_email")
       .eq("workspace_id", workspace.workspaceId)
-      .maybeSingle(),
+      .order("created_at", { ascending: false })
+      .limit(20),
     supabase
       .from("workspace_policies")
       .select(
@@ -94,7 +95,16 @@ export default async function OnboardingPage() {
     throw safeTableError;
   }
 
-  const senderSettings = !senderSettingsResult.error ? senderSettingsResult.data : null;
+  const senderSettings = !senderSettingsResult.error
+    ? (senderSettingsResult.data ?? [])
+    : [];
+  const configuredSender = senderSettings.find(
+    (sender) =>
+      Boolean(
+        sender.gmail_preset_email?.trim() ||
+          sender.reply_to_email?.trim(),
+      ),
+  );
   const policy = !policyResult.error ? policyResult.data : null;
   const contactsCount = contactsCountResult.count ?? 0;
   const templates = templatesResult.data ?? [];
@@ -121,13 +131,11 @@ export default async function OnboardingPage() {
     },
     {
       label: "Sender mailbox verified",
-      done: Boolean(
-        senderSettings?.gmail_preset_email?.trim() || senderSettings?.reply_to_email?.trim(),
-      ),
+      done: Boolean(configuredSender),
       pendingNote: "Configure sender mailbox in Sender Settings.",
       doneNote:
-        senderSettings?.gmail_preset_email?.trim() ??
-        senderSettings?.reply_to_email?.trim() ??
+        configuredSender?.gmail_preset_email?.trim() ??
+        configuredSender?.reply_to_email?.trim() ??
         "Mailbox configured",
       resumePath: "/app/settings/sender",
     },

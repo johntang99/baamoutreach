@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 
 type CampaignRecipientRow = {
@@ -34,18 +34,68 @@ function statusBadgeClass(status: string) {
 }
 
 interface CampaignRecipientTableProps {
+  workspaceId: string;
+  userId: string;
   campaignId: string;
   recipients: CampaignRecipientRow[];
 }
 
+const ADVANCED_ACTIONS_STORAGE_KEY_PREFIX =
+  "baam:campaign-recipient-table:show-advanced-actions:v1";
+const advancedActionsPreferenceListeners = new Set<() => void>();
+
+function advancedActionsStorageKey(workspaceId: string, userId: string) {
+  const normalizedWorkspaceId = workspaceId.trim() || "unknown-workspace";
+  const normalizedUserId = userId.trim() || "unknown-user";
+  return `${ADVANCED_ACTIONS_STORAGE_KEY_PREFIX}:${normalizedWorkspaceId}:${normalizedUserId}`;
+}
+
+function subscribeAdvancedActionsPreference(listener: () => void) {
+  advancedActionsPreferenceListeners.add(listener);
+  return () => {
+    advancedActionsPreferenceListeners.delete(listener);
+  };
+}
+
+function emitAdvancedActionsPreferenceChange() {
+  advancedActionsPreferenceListeners.forEach((listener) => listener());
+}
+
+function readAdvancedActionsPreference(storageKey: string) {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(storageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function CampaignRecipientTable({
+  workspaceId,
+  userId,
   campaignId,
   recipients,
 }: CampaignRecipientTableProps) {
   const router = useRouter();
+  const storageKey = advancedActionsStorageKey(workspaceId, userId);
   const [markingRecipientId, setMarkingRecipientId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const showAdvancedActions = useSyncExternalStore(
+    subscribeAdvancedActionsPreference,
+    () => readAdvancedActionsPreference(storageKey),
+    () => false,
+  );
+
+  useEffect(() => {
+    function onStorage(event: StorageEvent) {
+      if (event.key === storageKey) {
+        emitAdvancedActionsPreferenceChange();
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [storageKey]);
 
   async function markRecipientSent(recipientId: string) {
     setMarkingRecipientId(recipientId);
@@ -104,6 +154,28 @@ export function CampaignRecipientTable({
           {message}
         </p>
       ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <p className="text-xs text-slate-600">
+          Default flow: use{" "}
+          <span className="font-semibold text-slate-800">Open next queued in Gmail</span> in
+          Send actions. Row-level manual actions are hidden by default.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            const nextValue = !showAdvancedActions;
+            try {
+              window.localStorage.setItem(storageKey, nextValue ? "1" : "0");
+            } catch {
+              // Ignore localStorage write errors.
+            }
+            emitAdvancedActionsPreferenceChange();
+          }}
+          className="inline-flex h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          {showAdvancedActions ? "Hide advanced actions" : "Show advanced actions"}
+        </button>
+      </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200">
         <table className="w-full border-collapse text-xs">
@@ -171,7 +243,7 @@ export function CampaignRecipientTable({
                   {recipient.sent_at ? new Date(recipient.sent_at).toLocaleString() : "-"}
                 </td>
                 <td className="border-b border-slate-200 px-3 py-2">
-                  {recipient.status === "opened_gmail" ? (
+                  {showAdvancedActions && recipient.status === "opened_gmail" ? (
                     <div className="flex flex-wrap gap-2">
                       <a
                         href={recipient.gmail_compose_url}

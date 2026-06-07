@@ -72,31 +72,76 @@ export async function POST(
     );
   }
 
-  const { data: existingOpened, error: existingOpenedError } = await supabase
+  const { data: existingOpenedRows, error: existingOpenedError } = await supabase
     .from("campaign_recipients")
-    .select("id, email, full_name, gmail_compose_url")
+    .select("id, email, full_name")
     .eq("campaign_id", campaign.id)
     .eq("status", "opened_gmail")
-    .order("opened_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("opened_at", { ascending: false });
 
   if (existingOpenedError) {
     return NextResponse.json({ error: existingOpenedError.message }, { status: 400 });
   }
 
-  if (existingOpened) {
-    return NextResponse.json(
-      {
-        error:
-          "You already have an opened recipient. Mark it as sent before opening another.",
-        recipientId: existingOpened.id,
-        recipientEmail: existingOpened.email,
-        recipientName: existingOpened.full_name,
-        gmailUrl: existingOpened.gmail_compose_url,
-      },
-      { status: 409 },
-    );
+  let autoMarkedCount = 0;
+  let autoMarkedLastSent:
+    | {
+        fullName: string;
+        email: string;
+        sentAt: string;
+      }
+    | null = null;
+  if ((existingOpenedRows ?? []).length > 0) {
+    const sentAtIso = new Date().toISOString();
+    const { data: autoMarkedRows, error: autoMarkError } = await supabase
+      .from("campaign_recipients")
+      .update({
+        status: "sent",
+        sent_at: sentAtIso,
+      })
+      .eq("campaign_id", campaign.id)
+      .eq("status", "opened_gmail")
+      .select("id, email, full_name");
+
+    if (autoMarkError) {
+      return NextResponse.json({ error: autoMarkError.message }, { status: 400 });
+    }
+
+    autoMarkedCount = autoMarkedRows?.length ?? 0;
+    if (autoMarkedCount > 0) {
+      const firstAutoMarked = autoMarkedRows?.[0];
+      if (firstAutoMarked?.email) {
+        autoMarkedLastSent = {
+          fullName: firstAutoMarked.full_name ?? firstAutoMarked.email,
+          email: firstAutoMarked.email,
+          sentAt: sentAtIso,
+        };
+      }
+      await supabase.from("campaign_events").insert(
+        autoMarkedRows!.map((row) => ({
+          workspace_id: campaign.workspace_id,
+          campaign_id: campaign.id,
+          campaign_recipient_id: row.id,
+          event_type: "recipient_auto_marked_sent",
+          event_payload: {
+            recipient_email: row.email,
+            recipient_name: row.full_name,
+            reason: "open_next_queued",
+          },
+          created_by: user.id,
+        })),
+      );
+      await logWorkspaceAudit({
+        workspaceId: campaign.workspace_id,
+        actorUserId: user.id,
+        action: "campaign.recipient_auto_marked_sent",
+        entityType: "campaign",
+        entityId: campaign.id,
+        metadata: {
+          autoMarkedCount,
+        },
+      });
+    }
   }
 
   const { data: nextRecipient, error: nextRecipientError } = await supabase
@@ -115,39 +160,37 @@ export async function POST(
     return NextResponse.json({ error: nextRecipientError.message }, { status: 400 });
   }
 
-  if (!nextRecipient) {
-    return NextResponse.json({ done: true });
-  }
+  if (nextRecipient) {
+    const { error: updateRecipientError } = await supabase
+      .from("campaign_recipients")
+      .update({
+        status: "opened_gmail",
+        opened_at: new Date().toISOString(),
+      })
+      .eq("id", nextRecipient.id)
+      .eq("campaign_id", campaign.id);
 
-  const { error: updateRecipientError } = await supabase
-    .from("campaign_recipients")
-    .update({
+    if (updateRecipientError) {
+      return NextResponse.json({ error: updateRecipientError.message }, { status: 400 });
+    }
+
+    const { error: sendRequestError } = await supabase.from("send_requests").insert({
+      workspace_id: campaign.workspace_id,
+      contact_id: nextRecipient.contact_id,
+      template_id: campaign.template_id,
+      channel: "gmail_manual",
       status: "opened_gmail",
-      opened_at: new Date().toISOString(),
-    })
-    .eq("id", nextRecipient.id)
-    .eq("campaign_id", campaign.id);
+      subject: nextRecipient.subject,
+      body: nextRecipient.body,
+      gmail_compose_url: nextRecipient.gmail_compose_url,
+      risk_level: nextRecipient.risk_level,
+      risk_notes: nextRecipient.risk_notes ?? [],
+      created_by: user.id,
+    });
 
-  if (updateRecipientError) {
-    return NextResponse.json({ error: updateRecipientError.message }, { status: 400 });
-  }
-
-  const { error: sendRequestError } = await supabase.from("send_requests").insert({
-    workspace_id: campaign.workspace_id,
-    contact_id: nextRecipient.contact_id,
-    template_id: campaign.template_id,
-    channel: "gmail_manual",
-    status: "opened_gmail",
-    subject: nextRecipient.subject,
-    body: nextRecipient.body,
-    gmail_compose_url: nextRecipient.gmail_compose_url,
-    risk_level: nextRecipient.risk_level,
-    risk_notes: nextRecipient.risk_notes ?? [],
-    created_by: user.id,
-  });
-
-  if (sendRequestError && !isMissingTableError(sendRequestError)) {
-    return NextResponse.json({ error: sendRequestError.message }, { status: 400 });
+    if (sendRequestError && !isMissingTableError(sendRequestError)) {
+      return NextResponse.json({ error: sendRequestError.message }, { status: 400 });
+    }
   }
 
   const [queuedSummary, openedSummary, sentSummary] = await Promise.all([
@@ -193,30 +236,44 @@ export async function POST(
     return NextResponse.json({ error: updateCampaignError.message }, { status: 400 });
   }
 
-  await supabase.from("campaign_events").insert({
-    workspace_id: campaign.workspace_id,
-    campaign_id: campaign.id,
-    campaign_recipient_id: nextRecipient.id,
-    event_type: "recipient_opened_gmail",
-    event_payload: {
-      recipient_email: nextRecipient.email,
-      recipient_name: nextRecipient.full_name,
-    },
-    created_by: user.id,
-  });
+  if (nextRecipient) {
+    await supabase.from("campaign_events").insert({
+      workspace_id: campaign.workspace_id,
+      campaign_id: campaign.id,
+      campaign_recipient_id: nextRecipient.id,
+      event_type: "recipient_opened_gmail",
+      event_payload: {
+        recipient_email: nextRecipient.email,
+        recipient_name: nextRecipient.full_name,
+      },
+      created_by: user.id,
+    });
 
-  await logWorkspaceAudit({
-    workspaceId: campaign.workspace_id,
-    actorUserId: user.id,
-    action: "campaign.recipient_opened_gmail",
-    entityType: "campaign_recipient",
-    entityId: nextRecipient.id,
-    metadata: {
-      campaignId: campaign.id,
-      email: nextRecipient.email,
-      riskLevel: nextRecipient.risk_level,
-    },
-  });
+    await logWorkspaceAudit({
+      workspaceId: campaign.workspace_id,
+      actorUserId: user.id,
+      action: "campaign.recipient_opened_gmail",
+      entityType: "campaign_recipient",
+      entityId: nextRecipient.id,
+      metadata: {
+        campaignId: campaign.id,
+        email: nextRecipient.email,
+        riskLevel: nextRecipient.risk_level,
+      },
+    });
+  }
+
+  if (!nextRecipient) {
+    return NextResponse.json({
+      done: true,
+      queuedCount,
+      openedCount,
+      sentCount,
+      campaignStatus: nextStatus,
+      autoMarkedCount,
+      autoMarkedLastSent,
+    });
+  }
 
   return NextResponse.json({
     done: false,
@@ -230,5 +287,8 @@ export async function POST(
     suggestedDelaySeconds: Math.max(30, campaign.min_interval_seconds ?? 90),
     minIntervalSeconds: campaign.min_interval_seconds ?? 90,
     maxIntervalSeconds: campaign.max_interval_seconds ?? 120,
+    campaignStatus: nextStatus,
+    autoMarkedCount,
+    autoMarkedLastSent,
   });
 }

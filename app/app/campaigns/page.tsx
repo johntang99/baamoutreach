@@ -18,6 +18,12 @@ import { isMissingTableError, toSafeText } from "@/lib/single-send";
 import { createClient } from "@/lib/supabase/server";
 import { getOrCreatePrimaryWorkspace } from "@/lib/workspaces";
 
+function isMissingColumnError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const maybeCode = (error as { code?: string }).code;
+  return maybeCode === "42703";
+}
+
 export default async function CampaignsPage({
   searchParams,
 }: {
@@ -50,6 +56,7 @@ export default async function CampaignsPage({
     "use server";
 
     const name = toSafeText(formData.get("name"));
+    const senderSettingId = toSafeText(formData.get("sender_setting_id"));
     const templateId = toSafeText(formData.get("template_id"));
     const templateVariantSetId = toSafeText(formData.get("template_variant_set_id"));
     const sourceListId = toSafeText(formData.get("source_list_id"));
@@ -59,11 +66,11 @@ export default async function CampaignsPage({
     const minIntervalInputRaw = Number(formData.get("min_interval_seconds") ?? NaN);
     const maxIntervalInputRaw = Number(formData.get("max_interval_seconds") ?? NaN);
 
-    if (!name || !templateId || !sourceListId) {
+    if (!name || !senderSettingId || !templateId || !sourceListId) {
       redirect(
         "/app/campaigns?error=" +
           encodeURIComponent(
-            "Campaign name, template, and one recipient list are required.",
+            "Campaign name, sender, template, and one recipient list are required.",
           ),
       );
     }
@@ -188,6 +195,20 @@ export default async function CampaignsPage({
       );
     }
 
+    const { data: selectedSender, error: selectedSenderError } = await serverSupabase
+      .from("workspace_sender_settings")
+      .select("id, send_from_name, gmail_preset_email, reply_to_email, is_verified")
+      .eq("workspace_id", actionWorkspace.workspaceId)
+      .eq("id", senderSettingId)
+      .maybeSingle();
+
+    if (selectedSenderError || !selectedSender) {
+      redirect(
+        "/app/campaigns?error=" +
+          encodeURIComponent(selectedSenderError?.message ?? "Selected sender not found."),
+      );
+    }
+
     const sourceList = {
       id: selectedList.id,
       name: selectedList.name,
@@ -290,6 +311,7 @@ export default async function CampaignsPage({
       .insert({
         workspace_id: actionWorkspace.workspaceId,
         name,
+        sender_setting_id: selectedSender.id,
         source_list_id: sourceList.id,
         template_id: template.id,
         template_variant_set_id: selectedVariantSet?.id ?? null,
@@ -304,6 +326,14 @@ export default async function CampaignsPage({
       .single();
 
     if (campaignError || !campaign) {
+      if (campaignError && isMissingColumnError(campaignError)) {
+        redirect(
+          "/app/campaigns?error=" +
+            encodeURIComponent(
+              "Run supabase/migrations/0014_campaign_sender_selection.sql first.",
+            ),
+        );
+      }
       redirect(
         "/app/campaigns?error=" +
           encodeURIComponent(campaignError?.message ?? "Could not create campaign."),
@@ -472,6 +502,8 @@ export default async function CampaignsPage({
         skipped_count: skippedCount,
         include_role_emails: includeRoleEmails,
         source_list_id: sourceList.id,
+        sender_setting_id: selectedSender.id,
+        sender_email: selectedSender.gmail_preset_email ?? selectedSender.reply_to_email ?? null,
         variant_applied_count: variantAppliedCount,
         template_variant_set_id: selectedVariantSet?.id ?? null,
       },
@@ -495,6 +527,10 @@ export default async function CampaignsPage({
         maxIntervalSeconds: interval.max,
         sourceListId: sourceList.id,
         sourceListName: sourceList.name,
+        senderSettingId: selectedSender.id,
+        senderName: selectedSender.send_from_name,
+        senderEmail: selectedSender.gmail_preset_email ?? selectedSender.reply_to_email ?? null,
+        senderVerified: selectedSender.is_verified,
         variantAppliedCount,
         templateVariantSetId: selectedVariantSet?.id ?? null,
         templateVariantSetName: selectedVariantSet?.name ?? null,
@@ -516,6 +552,7 @@ export default async function CampaignsPage({
       `
         id,
         name,
+        sender_setting_id,
         source_list_id,
         template_variant_set_id,
         source_list:audience_lists (
@@ -537,6 +574,12 @@ export default async function CampaignsPage({
           id,
           name,
           campaign_type
+        ),
+        sender_setting:workspace_sender_settings (
+          id,
+          send_from_name,
+          gmail_preset_email,
+          is_verified
         ),
         template_variant_set:template_variant_sets (
           id,
@@ -572,15 +615,26 @@ export default async function CampaignsPage({
     .eq("status", "ready")
     .order("created_at", { ascending: false })
     .limit(100);
+  const { data: senderSettings, error: senderSettingsError } = await supabase
+    .from("workspace_sender_settings")
+    .select("id, send_from_name, gmail_preset_email, reply_to_email, is_verified")
+    .eq("workspace_id", workspace.workspaceId)
+    .order("created_at", { ascending: false })
+    .limit(100);
 
   const schemaMissing =
     isMissingTableError(campaignsError) ||
+    isMissingColumnError(campaignsError) ||
     isMissingTableError(templatesError) ||
     isMissingTableError(templateVariantSetsError);
   const listsMissing = isMissingTableError(readyListsError);
+  const senderSettingsMissing = isMissingTableError(senderSettingsError);
 
   if (readyListsError && !listsMissing) {
     throw readyListsError;
+  }
+  if (senderSettingsError && !senderSettingsMissing) {
+    throw senderSettingsError;
   }
   if (templateVariantSetsError && !isMissingTableError(templateVariantSetsError)) {
     throw templateVariantSetsError;
@@ -589,6 +643,7 @@ export default async function CampaignsPage({
   const safeCampaigns = campaigns ?? [];
   const safeTemplates = templates ?? [];
   const safeLists = readyLists ?? [];
+  const safeSenderSettings = senderSettings ?? [];
   const safeTemplateVariantSets = (templateVariantSets ?? []).map((row) => ({
     id: row.id,
     template_id: row.template_id,
@@ -649,11 +704,18 @@ export default async function CampaignsPage({
       ? activeCampaign.template[0]
       : activeCampaign.template
     : null;
+  const senderInfo = activeCampaign
+    ? Array.isArray(activeCampaign.sender_setting)
+      ? activeCampaign.sender_setting[0]
+      : activeCampaign.sender_setting
+    : null;
   const templateVariantSetInfo = activeCampaign
     ? Array.isArray(activeCampaign.template_variant_set)
       ? activeCampaign.template_variant_set[0]
       : activeCampaign.template_variant_set
     : null;
+  const effectivePreselectedSenderId =
+    activeCampaign?.sender_setting_id ?? safeSenderSettings[0]?.id ?? "";
   const effectivePreselectedListId = preselectedListId || activeCampaign?.source_list_id || "";
   const effectivePreselectedTemplateId = templateInfo?.id ?? "";
   const effectivePreselectedVariantSetId = templateVariantSetInfo?.id ?? "";
@@ -728,6 +790,28 @@ export default async function CampaignsPage({
           to enable single-list campaign source.
         </p>
       ) : null}
+      {senderSettingsMissing ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Sender settings table not ready yet. Run
+          <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs">
+            supabase/migrations/0004_policy_and_audit.sql
+          </code>
+          and
+          <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs">
+            supabase/migrations/0012_workspace_multiple_senders.sql
+          </code>
+          to enable sender selection in campaigns.
+        </p>
+      ) : null}
+      {!senderSettingsMissing && safeSenderSettings.length === 0 ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          No sender profile found. Add at least one sender in
+          <Link href="/app/settings/sender" className="ml-1 font-semibold underline">
+            Sender Settings
+          </Link>
+          before preparing a campaign.
+        </p>
+      ) : null}
 
       {schemaMissing ? (
         <SectionCard title="Database migration required">
@@ -739,6 +823,10 @@ export default async function CampaignsPage({
             and
             <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
               supabase/migrations/0011_template_variant_sets.sql
+            </code>
+            and
+            <code className="mx-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+              supabase/migrations/0014_campaign_sender_selection.sql
             </code>
             and refresh this page.
           </p>
@@ -782,137 +870,135 @@ export default async function CampaignsPage({
             </SectionCard>
           ) : null}
 
-          <section className="grid gap-3 xl:grid-cols-[1fr_1.3fr]">
-            <SectionCard title="Campaign setup">
-              <CampaignSetupForm
-                key={`campaign-setup-${activeCampaign?.id ?? "new"}-${effectivePreselectedTemplateId}-${effectivePreselectedListId}-${effectivePreselectedVariantSetId}`}
-                templates={safeTemplates}
-                readyLists={safeLists}
-                templateVariantSets={safeTemplateVariantSets}
-                preselectedListId={effectivePreselectedListId}
-                preselectedTemplateId={effectivePreselectedTemplateId}
-                preselectedVariantSetId={effectivePreselectedVariantSetId}
-                initialCampaignName={effectiveCampaignName}
-                initialDailyCap={effectiveDailyCap}
-                initialHardCap={effectiveHardCap}
-                initialMinIntervalSeconds={effectiveMinIntervalSeconds}
-                initialMaxIntervalSeconds={effectiveMaxIntervalSeconds}
-                initialAllowRoleBasedRecipients={effectiveAllowRoleBasedRecipients}
-                maxDailyCap={subscription.campaignDailyLimit}
-                maxHardCap={subscription.hardCapLimit}
-                createCampaignAction={createCampaign}
-              />
-            </SectionCard>
-
-            <SectionCard title="Send actions (same page)">
-              {activeCampaign ? (
-                <CampaignDetailActions
-                  campaignId={activeCampaign.id}
-                  initialQueuedCount={activeCampaign.queued_count ?? 0}
-                  minIntervalSeconds={activeCampaign.min_interval_seconds ?? 90}
-                  maxIntervalSeconds={activeCampaign.max_interval_seconds ?? 120}
-                  initialStatus={activeCampaign.status}
-                  initialOpenedRecipient={
-                    initialOpenedRecipient
-                      ? {
-                          id: initialOpenedRecipient.id,
-                          fullName:
-                            initialOpenedRecipient.full_name ??
-                            initialOpenedRecipient.email,
-                          email: initialOpenedRecipient.email,
-                        }
-                      : null
-                  }
-                  initialLastSentRecipient={
-                    initialLastSentRecipient
-                      ? {
-                          fullName:
-                            initialLastSentRecipient.full_name ??
-                            initialLastSentRecipient.email,
-                          email: initialLastSentRecipient.email,
-                          sentAt: initialLastSentRecipient.sent_at ?? new Date().toISOString(),
-                        }
-                      : null
-                  }
-                />
-              ) : (
-                <p className="text-sm text-slate-500">
-                  No prepared campaign yet. Configure setup and click
-                  <span className="mx-1 font-semibold text-slate-700">
-                    Save + Prepare recipients
-                  </span>
-                  first.
-                </p>
-              )}
-            </SectionCard>
-          </section>
+          <SectionCard title="Campaign setup">
+            <CampaignSetupForm
+              key={`campaign-setup-${activeCampaign?.id ?? "new"}-${effectivePreselectedSenderId}-${effectivePreselectedTemplateId}-${effectivePreselectedListId}-${effectivePreselectedVariantSetId}`}
+              senderOptions={safeSenderSettings}
+              templates={safeTemplates}
+              readyLists={safeLists}
+              templateVariantSets={safeTemplateVariantSets}
+              preselectedSenderId={effectivePreselectedSenderId}
+              preselectedListId={effectivePreselectedListId}
+              preselectedTemplateId={effectivePreselectedTemplateId}
+              preselectedVariantSetId={effectivePreselectedVariantSetId}
+              initialCampaignName={effectiveCampaignName}
+              initialDailyCap={effectiveDailyCap}
+              initialHardCap={effectiveHardCap}
+              initialMinIntervalSeconds={effectiveMinIntervalSeconds}
+              initialMaxIntervalSeconds={effectiveMaxIntervalSeconds}
+              initialAllowRoleBasedRecipients={effectiveAllowRoleBasedRecipients}
+              maxDailyCap={subscription.campaignDailyLimit}
+              maxHardCap={subscription.hardCapLimit}
+              createCampaignAction={createCampaign}
+            />
+          </SectionCard>
 
           {activeCampaign ? (
             <>
-              <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                <article className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    Status
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-                    {activeCampaign.status}
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Template: {templateInfo?.name ?? "-"}
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Variant set: {templateVariantSetInfo?.name ?? "None"}
-                  </p>
-                  {templateVariantSetInfo ? (
-                    <p className="text-[11px] text-blue-700">
-                      Distribution: Round-robin (#1 - #5)
-                    </p>
-                  ) : null}
-                  <p className="text-[11px] text-slate-500">
-                    Source: {sourceListInfo?.name ?? "-"}
-                  </p>
-                </article>
-                <article className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    Queued / Skipped
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-                    {activeCampaign.queued_count} / {activeCampaign.skipped_count}
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Total contacts: {activeCampaign.total_contacts}
-                  </p>
-                </article>
-                <article className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    Opened / Sent
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-                    {activeCampaign.opened_count} / {activeCampaign.sent_count}
-                  </p>
-                  <p className="text-[11px] text-slate-500">Manual Gmail progression</p>
-                </article>
-                <article className="rounded-xl border border-slate-200 bg-white p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
-                    Pacing
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
-                    {activeCampaign.min_interval_seconds}s-{activeCampaign.max_interval_seconds}s
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Daily cap {activeCampaign.daily_cap}, hard cap {activeCampaign.hard_cap}
-                  </p>
-                </article>
+              <section className="grid gap-3 xl:grid-cols-[1fr_1.3fr]">
+                <SectionCard title="Ready session">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <article className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                        Status
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                        {activeCampaign.status}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Sender: {senderInfo?.send_from_name ?? senderInfo?.gmail_preset_email ?? "-"}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Template: {templateInfo?.name ?? "-"}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Variant set: {templateVariantSetInfo?.name ?? "None"}
+                      </p>
+                      {templateVariantSetInfo ? (
+                        <p className="text-[11px] text-blue-700">
+                          Distribution: Round-robin (#1 - #5)
+                        </p>
+                      ) : null}
+                      <p className="text-[11px] text-slate-500">
+                        Source: {sourceListInfo?.name ?? "-"}
+                      </p>
+                    </article>
+                    <article className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                        Queued / Skipped
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                        {activeCampaign.queued_count} / {activeCampaign.skipped_count}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Opened / Sent: {activeCampaign.opened_count} / {activeCampaign.sent_count}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Total contacts: {activeCampaign.total_contacts}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Pacing: {activeCampaign.min_interval_seconds}s-{activeCampaign.max_interval_seconds}s
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Daily cap {activeCampaign.daily_cap}, hard cap {activeCampaign.hard_cap}
+                      </p>
+                    </article>
+                  </div>
+                </SectionCard>
+
+                <SectionCard title="Send actions (same page)">
+                  <CampaignDetailActions
+                    campaignId={activeCampaign.id}
+                    initialQueuedCount={activeCampaign.queued_count ?? 0}
+                    minIntervalSeconds={activeCampaign.min_interval_seconds ?? 90}
+                    maxIntervalSeconds={activeCampaign.max_interval_seconds ?? 120}
+                    initialStatus={activeCampaign.status}
+                    initialOpenedRecipient={
+                      initialOpenedRecipient
+                        ? {
+                            id: initialOpenedRecipient.id,
+                            fullName:
+                              initialOpenedRecipient.full_name ??
+                              initialOpenedRecipient.email,
+                            email: initialOpenedRecipient.email,
+                          }
+                        : null
+                    }
+                    initialLastSentRecipient={
+                      initialLastSentRecipient
+                        ? {
+                            fullName:
+                              initialLastSentRecipient.full_name ??
+                              initialLastSentRecipient.email,
+                            email: initialLastSentRecipient.email,
+                            sentAt: initialLastSentRecipient.sent_at ?? new Date().toISOString(),
+                          }
+                        : null
+                    }
+                  />
+                </SectionCard>
               </section>
 
               <SectionCard title={`Recipient list: ${activeCampaign.name}`}>
                 <CampaignRecipientTable
+                  workspaceId={workspace.workspaceId}
+                  userId={user.id}
                   campaignId={activeCampaign.id}
                   recipients={safeRecipients}
                 />
               </SectionCard>
             </>
-          ) : null}
+          ) : (
+            <SectionCard title="Ready session">
+              <p className="text-sm text-slate-500">
+                No prepared campaign yet. Configure setup and click
+                <span className="mx-1 font-semibold text-slate-700">
+                  Save + Prepare recipients
+                </span>
+                first.
+              </p>
+            </SectionCard>
+          )}
         </>
       )}
     </div>

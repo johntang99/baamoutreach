@@ -36,7 +36,6 @@ export function CampaignDetailActions({
 }: CampaignDetailActionsProps) {
   const router = useRouter();
   const [isOpening, setIsOpening] = useState(false);
-  const [isMarking, setIsMarking] = useState(false);
   const [isTogglingStatus, setIsTogglingStatus] = useState(false);
   const [campaignStatus, setCampaignStatus] = useState(initialStatus);
   const [openedRecipient, setOpenedRecipient] = useState<RecipientSummary | null>(
@@ -64,6 +63,16 @@ export function CampaignDetailActions({
 
   async function openNextQueued() {
     if (waitSeconds > 0 || isPaused) return;
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      setError("Browser blocked popup. Please allow popups for this site and retry.");
+      setMessage(null);
+      return;
+    }
+    popup.document.title = "Opening Gmail compose...";
+    popup.document.body.innerHTML =
+      "<p style='font-family:Arial,sans-serif;padding:16px;'>Preparing Gmail compose...</p>";
+
     setIsOpening(true);
     setError(null);
     setMessage(null);
@@ -85,9 +94,17 @@ export function CampaignDetailActions({
         suggestedDelaySeconds?: number;
         minIntervalSeconds?: number;
         maxIntervalSeconds?: number;
+        campaignStatus?: string;
+        autoMarkedCount?: number;
+        autoMarkedLastSent?: {
+          fullName?: string;
+          email?: string;
+          sentAt?: string;
+        } | null;
       };
 
       if (!response.ok) {
+        popup.close();
         if (data.recipientId && data.recipientEmail) {
           setOpenedRecipient({
             id: data.recipientId,
@@ -103,13 +120,30 @@ export function CampaignDetailActions({
       }
 
       if (data.done) {
+        popup.close();
         setQueuedLeft(0);
         setOpenedRecipient(null);
-        setMessage("No queued recipients remaining.");
+        if (data.campaignStatus) {
+          setCampaignStatus(data.campaignStatus);
+        }
+        if (data.autoMarkedLastSent?.email) {
+          setLastSentRecipient({
+            fullName:
+              data.autoMarkedLastSent.fullName ?? data.autoMarkedLastSent.email,
+            email: data.autoMarkedLastSent.email,
+            sentAt: data.autoMarkedLastSent.sentAt ?? new Date().toISOString(),
+          });
+        }
+        setMessage(
+          data.autoMarkedCount && data.autoMarkedCount > 0
+            ? `Auto-marked ${data.autoMarkedCount} opened recipient(s) as sent. No queued recipients remaining.`
+            : "No queued recipients remaining.",
+        );
         return;
       }
 
       if (!data.gmailUrl || !data.recipientId || !data.recipientEmail) {
+        popup.close();
         setError("No Gmail URL returned.");
         return;
       }
@@ -123,93 +157,35 @@ export function CampaignDetailActions({
       setQueuedLeft((current) =>
         data.queuedCount ?? Math.max(current - 1, 0),
       );
+      if (data.campaignStatus) {
+        setCampaignStatus(data.campaignStatus);
+      }
+      if (data.autoMarkedLastSent?.email) {
+        setLastSentRecipient({
+          fullName:
+            data.autoMarkedLastSent.fullName ?? data.autoMarkedLastSent.email,
+          email: data.autoMarkedLastSent.email,
+          sentAt: data.autoMarkedLastSent.sentAt ?? new Date().toISOString(),
+        });
+      }
       const delaySeconds = Math.max(
         30,
         data.suggestedDelaySeconds ?? minIntervalSeconds,
       );
       setNextAllowedOpenAt(Date.now() + delaySeconds * 1000);
-
-      const popup = window.open(data.gmailUrl, "_blank", "noopener,noreferrer");
-      if (!popup) {
-        setMessage(
-          `Popup was blocked${data.recipientEmail ? ` for ${data.recipientEmail}` : ""}. Use the fallback Gmail link below, then click "Mark last opened as sent". ${
-            data.queuedCount !== undefined ? `${data.queuedCount} queued left.` : ""
-          }`,
-        );
-        router.refresh();
-        return;
-      }
+      popup.location.href = data.gmailUrl;
 
       setMessage(
-        `Opened Gmail compose${data.recipientEmail ? ` for ${data.recipientEmail}` : ""}. Click Send in Gmail, then return here and click "Mark last opened as sent". ${
+        `${data.autoMarkedCount && data.autoMarkedCount > 0 ? `Auto-marked ${data.autoMarkedCount} previous opened recipient(s) as sent. ` : ""}Opened Gmail compose${data.recipientEmail ? ` for ${data.recipientEmail}` : ""}. ${
           data.queuedCount !== undefined ? `${data.queuedCount} queued left.` : ""
         }`,
       );
       router.refresh();
     } catch {
+      popup.close();
       setError("Network error while opening next recipient.");
     } finally {
       setIsOpening(false);
-    }
-  }
-
-  async function markLastAsSent() {
-    if (!openedRecipient?.id) {
-      setError("Open a queued recipient first, then send in Gmail.");
-      return;
-    }
-
-    setIsMarking(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const response = await fetch(`/api/campaigns/${campaignId}/mark-sent`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          recipientId: openedRecipient.id,
-        }),
-      });
-      const data = (await response.json()) as {
-        error?: string;
-        alreadySent?: boolean;
-        queuedCount?: number;
-        openedCount?: number;
-        sentCount?: number;
-        recipientName?: string;
-        recipientEmail?: string;
-        sentAt?: string;
-        campaignStatus?: string;
-      };
-
-      if (!response.ok) {
-        setError(data.error ?? "Could not mark recipient as sent.");
-        return;
-      }
-
-      setLastGmailUrl(null);
-      setOpenedRecipient(null);
-      const sentAt = data.sentAt ?? new Date().toISOString();
-      setLastSentRecipient({
-        fullName: data.recipientName ?? openedRecipient.fullName,
-        email: data.recipientEmail ?? openedRecipient.email,
-        sentAt,
-      });
-      if (data.campaignStatus) {
-        setCampaignStatus(data.campaignStatus);
-      }
-      if (typeof data.queuedCount === "number") {
-        setQueuedLeft(data.queuedCount);
-      }
-      setMessage(data.alreadySent ? "Recipient was already marked as sent." : "Recipient marked as sent.");
-      router.refresh();
-    } catch {
-      setError("Network error while marking sent.");
-    } finally {
-      setIsMarking(false);
     }
   }
 
@@ -274,14 +250,6 @@ export function CampaignDetailActions({
         </button>
         <button
           type="button"
-          onClick={markLastAsSent}
-          disabled={isMarking || isPaused || !openedRecipient}
-          className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isMarking ? "Saving..." : "Mark last opened as sent"}
-        </button>
-        <button
-          type="button"
           onClick={toggleCampaignState}
           disabled={isTogglingStatus}
           className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -301,7 +269,8 @@ export function CampaignDetailActions({
       </p>
       <p className="text-xs text-slate-500">
         Campaigns are sent manually through Gmail. This app prepares the next compose
-        draft, but you must click <strong>Send</strong> in Gmail, then mark it as sent here.
+        draft and auto-marks the previous opened recipient as sent when you click
+        <strong> Open next queued in Gmail</strong> again.
       </p>
       <p className="text-xs text-slate-500">
         Send interval guidance: keep about{" "}
